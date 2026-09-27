@@ -1,0 +1,58 @@
+# ===== Python 运行时与缓存 =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== 本地模型（大文件，用 tools/fetch_ct2_model.ps1 重新获取）=====
+models/
+frontend/src-tauri/models/
+*.gguf
+*.safetensors
+
+# ===== 前端 / Node 依赖与产物 =====
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ===== Tauri / Rust 产物与外部二进制 =====
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+frontend/src-tauri/binaries/
+frontend/src-tauri/bin/
+
+# ===== Python 打包产物（PyInstaller）=====
+/build/
+/dist/
+/bin/
+subai-backend.exe
+*.manifest
+
+# ===== 运行产物 =====
+output/
+output-backup/
+logs/
+data/*.wav
+data/*.png
+*.db
+build_log.txt
+
+# ===== 环境变量与密钥 =====
+.env
+.env.*
+!.env.example
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log

@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 构建输出
+dist/
+src-tauri/target/
+src-tauri/src-tauri-*
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# Tauri 图标（临时）
+src-tauri/icons/*.png
+src-tauri/icons/*.ico
+src-tauri/icons/*.icns
+
+# 其他
+*.log
+.env
+.env.local

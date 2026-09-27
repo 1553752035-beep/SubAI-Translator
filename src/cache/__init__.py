@@ -1,0 +1,1 @@
+# SubAI Translator 包初始化

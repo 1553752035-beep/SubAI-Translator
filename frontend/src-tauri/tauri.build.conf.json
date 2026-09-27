@@ -1,0 +1,21 @@
+{
+  "appId": "com.subai.translator",
+  "productName": "SubAI Translator",
+  "windows": {
+    "certificateFile": "",
+    "digestAlgorithm": "sha256",
+    "webviewInstallMode": {
+      "type": "skipInstaller"
+    },
+    "wix": {
+      "language": ["zh-CN", "en-US"]
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "src-tauri/**/*"
+  ],
+  "publish": {
+    "provider": "github"
+  }
+}

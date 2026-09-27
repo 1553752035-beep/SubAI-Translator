@@ -1,0 +1,30 @@
+# SubAI Translator —— Python 后端依赖清单
+# 安装：pip install -r requirements.txt
+#
+# 说明：
+#   - 核心依赖（必装）支撑 API 服务、任务队列、缓存、翻译与字幕生成；
+#   - ASR / OCR 为重型模型库，hardsub 与语音识别模式依赖它们；
+#   - torch 为可选依赖，仅在启用 NVIDIA GPU 加速时需要。
+
+# ---------------- 核心（必装）----------------
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pydantic-settings>=2.2
+httpx>=0.27
+aiosqlite>=0.20
+python-multipart>=0.0.9
+
+# ---------------- ASR 语音识别 ----------------
+faster-whisper>=1.0
+
+# ---------------- OCR 硬字幕识别 ----------------
+rapidocr-onnxruntime>=1.3
+opencv-python>=4.8
+
+# ---------------- GPU 加速（可选，有 NVIDIA GPU 时启用）----------------
+# torch>=2.1
+
+# ---------------- 测试 ----------------
+pytest>=8.0
+pytest-asyncio>=0.23
