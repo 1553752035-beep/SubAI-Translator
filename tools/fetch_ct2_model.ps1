@@ -12,13 +12,17 @@ param(
   [string]$OutDir = ''
 )
 
-# Derive paths from this script's location so it works in any install directory:
-#   <repo>/tools/fetch_ct2_model.ps1  ->  install root = parent of <repo>
-if (-not $OutDir) {
-  $installRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-  $OutDir = Join-Path $installRoot 'models\faster-whisper-small'
+# Derive paths from this script's location. Two layouts are supported:
+#   source repo   : <root>/<repo>/tools/fetch_ct2_model.ps1  (repo has requirements.txt)
+#   green package : <root>/tools/fetch_ct2_model.ps1
+$parent = Split-Path $PSScriptRoot -Parent
+if (Test-Path (Join-Path $parent 'requirements.txt')) {
+  $installRoot = Split-Path $parent -Parent
+} else {
+  $installRoot = $parent
 }
-$logDir = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'logs'
+if (-not $OutDir) { $OutDir = Join-Path $installRoot 'models\faster-whisper-small' }
+$logDir = Join-Path $installRoot 'logs'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 

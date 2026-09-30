@@ -1,6 +1,6 @@
 # 依赖
 node_modules/
-package-lock.json
+# package-lock.json 必须提交：npm ci 与 CI 缓存都依赖它（应用项目不应忽略锁文件）
 
 # 构建输出
 dist/
