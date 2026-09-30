@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 
-$py     = 'D:\SubAI-Translator\.venv\Scripts\python.exe'
-$logdir = 'D:\SubAI-Translator\logs'
+# 路径由脚本位置推导：<install root>/源码/setup/install_all.ps1
+$installRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$venvPy = Join-Path $installRoot '.venv\Scripts\python.exe'
+$py = if (Test-Path $venvPy) { $venvPy } else { 'python' }
+$logdir = Join-Path $installRoot 'logs'
 New-Item -ItemType Directory -Force -Path $logdir | Out-Null
 $main = Join-Path $logdir 'install_all.log'
 if (Test-Path $main) { Remove-Item $main -Force }
@@ -58,7 +61,7 @@ Run 'asr-faster-whisper' @('faster-whisper') $null
 # ---- OCR: PP-OCR models through ONNX Runtime (no PaddlePaddle needed) ----
 Run 'ocr-rapidocr' @('rapidocr-onnxruntime','onnxruntime') $null
 
-# ---- torch ------------------------------------------------------------------
+# ---- torch（已不需要）--------------------------------------------------------
 # The CUDA build is a ~2.8 GB download. Probed 2026-09-13:
 #   https://download.pytorch.org/whl/cu129  ->  ~384 KB/s  (about 2 hours)
 #   mirror.sjtu.edu.cn/pytorch-wheels/cu129 ->  hangs, unusable
@@ -66,7 +69,9 @@ Run 'ocr-rapidocr' @('rapidocr-onnxruntime','onnxruntime') $null
 # CTranslate2, RapidOCR runs on ONNX Runtime, translation goes to the local
 # koboldcpp HTTP endpoint), so only the small CPU build is installed here to
 # keep `import torch` working. GPU torch is an optional upgrade, see report.
-Run 'torch-cpu' @('torch') $null
+# v3.1.2 起 GPU 能力由 CTranslate2 + nvidia-* 运行库提供，torch 不再是任何功能的依赖，
+# 因此这里不再安装（如需 torch 作显存探测兜底，可自行 pip install torch）。
+# Run 'torch-cpu' @('torch') $null
 
 Log ''
 Log '=== FINAL PACKAGE LIST ==='

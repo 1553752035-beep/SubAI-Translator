@@ -3,7 +3,7 @@
 # SubAI Translator —— 后端生产镜像（三期：容器化部署）
 # =============================================================================
 # 默认构建 CPU 推理镜像（体积 ≤ 2GB）。
-# GPU 加速镜像见文末注释（需 NVIDIA CUDA 基础镜像 + torch，体积会显著增大）。
+# GPU 加速镜像见文末注释（需 NVIDIA CUDA 基础镜像 + nvidia-* 运行库；不需要 torch）。
 #
 # 构建：
 #   docker build -t subai-backend:latest .
@@ -73,5 +73,5 @@ CMD ["python", "-m", "uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--po
 # ---------------------------------------------------------------------------
 # （可选）GPU 加速镜像：取消下方注释并替换基础镜像
 #   FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
-#   安装 python3.12 + ffmpeg，pip 安装 torch（含 CUDA）后再装 faster-whisper。
+#   安装 python3.12 + ffmpeg，pip 安装 nvidia-cublas-cu12 / nvidia-cudnn-cu12 后再装 faster-whisper。
 # ---------------------------------------------------------------------------

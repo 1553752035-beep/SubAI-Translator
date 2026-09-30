@@ -9,11 +9,20 @@
 #   otherwise impossible download into a merely slow one.
 param(
   [string]$Repo   = 'Systran/faster-whisper-small',
-  [string]$OutDir = 'D:\SubAI-Translator\models\faster-whisper-small'
+  [string]$OutDir = ''
 )
 
-$log = 'D:\SubAI-Translator\logs\fetch_model.log'
+# Derive paths from this script's location so it works in any install directory:
+#   <repo>/tools/fetch_ct2_model.ps1  ->  install root = parent of <repo>
+if (-not $OutDir) {
+  $installRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+  $OutDir = Join-Path $installRoot 'models\faster-whisper-small'
+}
+$logDir = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'logs'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+$log = Join-Path $logDir 'fetch_model.log'
 
 function Log($m) {
   ((Get-Date).ToString('HH:mm:ss') + '  ' + $m) | Out-File $log -Append -Encoding utf8

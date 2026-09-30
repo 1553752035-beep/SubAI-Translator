@@ -33,9 +33,10 @@ import time
 import wave
 from concurrent.futures import ThreadPoolExecutor
 
-# 项目根目录（开发源码根）与发布资源根（models/bin 所在）
-SRC_ROOT = r"D:\SubAI-Translator\源码"
-PUB_ROOT = r"D:\SubAI-Translator"
+# 项目根目录（本脚本所在仓库根）与发布资源根（models/bin 所在，默认是仓库的上一级）
+# 全部由脚本位置推导，避免写死开发机路径。
+SRC_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PUB_ROOT = os.path.dirname(SRC_ROOT)
 
 sys.path.insert(0, SRC_ROOT)
 

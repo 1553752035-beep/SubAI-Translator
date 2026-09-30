@@ -4,7 +4,8 @@
 # 说明：
 #   - 核心依赖（必装）支撑 API 服务、任务队列、缓存、翻译与字幕生成；
 #   - ASR / OCR 为重型模型库，hardsub 与语音识别模式依赖它们；
-#   - torch 为可选依赖，仅在启用 NVIDIA GPU 加速时需要。
+#   - torch 并非必需：GPU 加速由 CTranslate2 + nvidia-* 运行库提供，torch 只在
+#     nvidia-smi 不可用时作为显存探测的兜底（见 src/config.py 的 get_asr_device）。
 
 # ---------------- 核心（必装）----------------
 fastapi>=0.110

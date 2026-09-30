@@ -87,7 +87,7 @@ SubAI Translator v2.0 是一个基于 **React + Tauri** 的桌面应用程序，
 ## 📂 项目结构
 
 ```
-D:\SubAI-Translator\frontend\
+frontend/
 ├── src/
 │   ├── api/
 │   │   └── tauri.ts              # Tauri 命令调用层
@@ -126,7 +126,7 @@ D:\SubAI-Translator\frontend\
 ### 1. 安装依赖
 
 ```bash
-cd D:\SubAI-Translator\frontend
+cd <安装目录>/源码/frontend
 npm install
 ```
 

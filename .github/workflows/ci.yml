@@ -1,10 +1,16 @@
-# SubAI Translator —— 持续集成
+# SubAI Translator —— 持续集成（Windows）
 #
-# 说明：下列每一步的**命令**都已在本机验证通过（Windows），
-# 但 GitHub Actions 的 Linux 运行环境无法在本机复现，
-# 因此本文件在首次推送到 GitHub 之前**未经真实运行**；若首跑失败，请据日志调整。
+# 为什么是 windows-latest 而不是 ubuntu：
+#   本项目的**目标平台就是 Windows** —— Windows SAPI 语音合成、bin\ffmpeg.exe、
+#   CUDA DLL 目录加载、PyInstaller 单文件、Tauri 桌面端。跑在 Linux 上会有大量
+#   Windows 专有路径被跳过，等于没有验证真实目标平台。
+#   （后端另有 Linux 容器镜像，见 Dockerfile；容器化验证 V-1~V-3 完成后再补 Linux 任务。）
 #
-# 需要外部资源的用例会自动跳过（ASR 模型不随仓库分发；本地 LLM 服务不在 CI 中）。
+# 说明：下列每一步的命令都已在本机（Windows）验证通过，但 GitHub Actions 的运行环境
+# 无法在本机完全复现，本文件在首次推送到 GitHub 之前**未经真实运行**；若首跑失败请据日志调整。
+#
+# 需要外部资源的用例会自动跳过：ASR 模型不随仓库分发、本地 LLM 服务不在 CI 中、
+# 无 SAPI 音色时跳过语音合成用例、无 FFmpeg 时跳过抽音轨/压制用例。
 name: CI
 
 on:
@@ -16,8 +22,8 @@ on:
 
 jobs:
   backend:
-    name: 后端测试 (pytest)
-    runs-on: ubuntu-latest
+    name: 后端测试 (pytest, Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -27,10 +33,11 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: 安装系统依赖（FFmpeg 与 OpenCV 运行时）
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libgl1 libglib2.0-0
+      # 让依赖 FFmpeg 的用例（抽音轨 / 压制 / 配音时间对齐）真正执行；
+      # 安装失败不阻塞，相应用例会自动跳过。
+      - name: 安装 FFmpeg（失败不阻塞）
+        continue-on-error: true
+        run: choco install ffmpeg -y --no-progress
 
       - name: 安装 Python 依赖
         run: pip install -r requirements.txt
@@ -38,11 +45,11 @@ jobs:
       - name: 运行测试
         env:
           RUN_API_TESTS: '1'
-        run: python -m pytest tests -q
+        run: python -m pytest tests -q -rs
 
   frontend:
-    name: 前端测试 (vitest)
-    runs-on: ubuntu-latest
+    name: 前端测试 (vitest, Windows)
+    runs-on: windows-latest
     defaults:
       run:
         working-directory: frontend

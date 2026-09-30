@@ -16,17 +16,18 @@ AI 视频字幕识别与翻译工具：自动提取视频里的语音或硬字�
 
 | 依赖 | 说明 |
 |------|------|
+| **Windows 10/11** | **目标平台**：桌面端与语音合成都依赖 Windows 专有组件（SAPI、`bin\ffmpeg.exe`、CUDA DLL 目录、Tauri）。后端另有 Linux 容器镜像（见 `Dockerfile`） |
 | Python 3.12+ | 运行后端 |
 | FFmpeg | 项目已自带（`bin/` 目录），无需单独安装 |
 | Node.js 18+ | 仅运行桌面/网页界面时需要 |
-| NVIDIA GPU（可选） | 加速语音识别，需额外安装 `torch` |
+| NVIDIA GPU（可选） | 加速语音识别。**不需要安装 `torch`**：需同时满足「CTranslate2 支持 CUDA + 能找到 CUDA 运行库 + 空闲显存 ≥4GB」，详见「GPU 加速（可选）」 |
 
 ## 快速上手
 
 ### 第 1 步：启动后端
 
 ```powershell
-cd D:\SubAI-Translator
+cd <安装目录>                      # 本机示例：D:\SubAI-Translator
 pip install -r requirements.txt   # 首次运行
 python src/start.py
 ```
@@ -119,16 +120,27 @@ powershell -ExecutionPolicy Bypass -File tools\build_green_package.ps1 -OutDir D
 
 ## 目录结构
 
+**绿色版**（`tools/build_green_package.ps1` 组装）：
+
 ```
-D:\SubAI-Translator
-├── src/             后端代码（FastAPI）
-├── frontend/        界面代码（React + Tauri）
-├── bin/             FFmpeg 可执行文件
-├── models/          语音识别模型
-├── output/          字幕输出目录
-├── data/            数据库与上传文件
-├── tests/           测试用例
-└── requirements.txt Python 依赖清单
+<安装目录>/
+├── SubAI-Translator.exe    桌面端
+├── subai-backend.exe       后端
+├── bin/                    FFmpeg 可执行文件
+├── models/                 语音识别模型
+├── data/                   数据库与上传文件
+└── output/                 字幕与音视频输出
+```
+
+**源码仓库**（即绿色版里的 `<安装目录>/源码`；源码方式运行时 `<安装目录>` 为仓库的上一级）：
+
+```
+├── src/                    后端代码（FastAPI）
+├── frontend/               界面代码（React + Tauri）
+├── tests/                  测试用例
+├── tools/                  自检、组装绿色版与运维脚本
+├── .github/workflows/      CI（Windows）
+└── requirements.txt        Python 依赖清单
 ```
 
 ## 常见问题

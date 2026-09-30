@@ -18,10 +18,12 @@ param(
     [ValidateSet('Copy', 'Link')]
     [string]$Mode = 'Copy',
     [string]$Source = '',
-    [string]$OutDir = 'D:\SubAI-Translator\dist-gpu-pack'
+    [string]$OutDir = ''
 )
 $ErrorActionPreference = 'Stop'
 
+$installRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+if (-not $OutDir) { $OutDir = Join-Path $installRoot 'dist-gpu-pack' }
 if (-not $Source) {
     $Source = Join-Path $PSScriptRoot '..\.venv\Lib\site-packages\nvidia'
 }

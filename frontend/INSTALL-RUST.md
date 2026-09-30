@@ -83,7 +83,7 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";"
 安装 Rust 后，运行：
 
 ```powershell
-cd D:\SubAI-Translator\frontend
+cd <安装目录>/源码/frontend
 npm install
 npm run tauri:dev
 ```
