@@ -293,13 +293,15 @@ class TaskQueue:
                     lambda: queue_task.callback(**merged_kwargs)
                 )
             
-            # 更新任务状态为completed
-            await self.task_manager.update_task(
-                task_id,
-                status="completed",
-                progress=1.0,
-                message="任务完成"
-            )
+            # 尊重回调显式写入的终态：回调若已置为 completed/failed/cancelled/archived，不再覆盖
+            current = await self.task_manager.get_task(task_id)
+            if current is None or current.status not in ("completed", "failed", "cancelled", "archived"):
+                await self.task_manager.update_task(
+                    task_id,
+                    status="completed",
+                    progress=1.0,
+                    message="任务完成"
+                )
             
             queue_task.completed_at = time.time()
             logger.info(f"任务 {task_id} 完成（耗时 {queue_task.completed_at - queue_task.started_at:.1f}s）")

@@ -344,29 +344,34 @@ def translate(
     batch_size: int = 10,
     progress_callback: Optional[Callable] = None,
     use_cache: bool = True,
+    stats: Optional[dict] = None,
 ) -> list[str]:
     """
     逐批复用一次请求翻译多行（编号协议），解析失败自动退回逐行翻译。
 
-    二期增强：
-    - 翻译缓存：每个源文先查 cache，命中直接返回；翻译成功后写入 cache
+    容错策略（v3.1.1）：
+    - 术语库命中与缓存命中直接返回，不送 LLM；
+    - 批量请求失败或解析不全时退回逐行；逐行仍失败的行**不抛异常**，记为失败并留空，
+      同时写入 stats["failed"]。是否额外输出原文转录由 run_pipeline 决定。
+      这样"翻译后端不可用"不会导致 ASR 识别结果整体丢失。
 
-    三期修复：
-    - 缓存实例与事件循环在单次调用内一一对应。run_pipeline 运行在线程池中，
-      而 aiosqlite 连接必须固定在同一事件循环内使用，跨循环复用连接不安全；
-      这里为每次调用新建独立缓存实例 + 独立事件循环，并在 finally 中统一关闭，
-      既消除跨循环隐患，也避免每个缓存操作都新建/销毁事件循环。
+    stats（可选，出参）: total / terms / cache_hits / llm_requests / failed
     """
     t0 = time.time()
     out: list[str] = [""] * len(texts)
     todo: list[int] = []
 
-    # 术语库优先：命中即锁定，不送LLM
+    if stats is not None:
+        stats.update({"total": len(texts), "terms": 0, "cache_hits": 0, "llm_requests": 0, "failed": 0})
+
+    # 术语库优先：命中即锁定，不送 LLM
     for i, t in enumerate(texts):
         if t in terms:
             out[i] = terms[t]
         else:
             todo.append(i)
+    if stats is not None:
+        stats["terms"] = len(texts) - len(todo)
 
     cache_hits = 0
     todo_after_cache: list[int] = []
@@ -405,10 +410,24 @@ def translate(
                     todo_after_cache.append(i)
         else:
             todo_after_cache = list(todo)
+        if stats is not None:
+            stats["cache_hits"] = cache_hits
 
         n_batch = 0
+        failed = 0
         total_batches = (len(todo_after_cache) + batch_size - 1) // batch_size if todo_after_cache else 0
         current_batch = 0
+
+        def _translate_one(i: int) -> None:
+            """单行翻译；失败不抛异常，只记录并留空。"""
+            nonlocal n_batch, failed
+            try:
+                out[i] = _call_llm(texts[i], target)
+                n_batch += 1
+            except Exception as e:  # noqa: BLE001
+                out[i] = ""
+                failed += 1
+                log("  [翻译] 第 %d 行失败：%r" % (i + 1, e))
 
         for s in range(0, len(todo_after_cache), batch_size):
             idxs = todo_after_cache[s:s + batch_size]
@@ -433,15 +452,12 @@ def translate(
                         out[i] = got.get(n + 1, "")
                 else:
                     for i in idxs:
-                        out[i] = _call_llm(texts[i], target)
-                        n_batch += 1
+                        _translate_one(i)
             except Exception as e:
                 log("  [翻译] 批量请求失败(%r)，退回逐行" % e)
                 for i in idxs:
-                    out[i] = _call_llm(texts[i], target)
-                    n_batch += 1
+                    _translate_one(i)
 
-            # 翻译成功后写入缓存（与查询共用同一事件循环）
             if cache_obj is not None and cache_loop is not None:
                 for i in idxs:
                     if out[i] and not out[i].startswith("[翻译失败"):
@@ -454,9 +470,13 @@ def translate(
                 progress = 0.6 + (current_batch / total_batches) * 0.35
                 progress_callback(progress, f"翻译中 {current_batch}/{total_batches} 批")
 
+        if stats is not None:
+            stats["llm_requests"] = n_batch
+            stats["failed"] = failed
+
         dt = time.time() - t0
-        log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d 行）"
-            % (len(texts), target, n_batch, dt, len(texts) - len(todo), cache_hits))
+        log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d / 失败 %d 行）"
+            % (len(texts), target, n_batch, dt, len(texts) - len(todo), cache_hits, failed))
 
         if progress_callback:
             progress_callback(0.95, "翻译完成")
@@ -545,7 +565,8 @@ def run_pipeline(
     db_path: Optional[str] = None,
     output_format: str = "srt",
     sample_fps: Optional[float] = None,
-    progress_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None,
+    stats: Optional[dict] = None,
 ) -> list[str]:
     """
     完整Pipeline（视频 -> 字幕 -> 翻译 -> 输出）
@@ -609,7 +630,7 @@ def run_pipeline(
     # 第3步：翻译
     log("[3/4] 翻译 ...")
     texts = [r["text"] for r in rows]
-    translated = translate(texts, target_lang, terms, progress_callback=progress_callback)
+    translated = translate(texts, target_lang, terms, progress_callback=progress_callback, stats=stats)
     
     # 第4步：落盘
     log("[4/4] 写出字幕 ...")
@@ -646,6 +667,14 @@ def run_pipeline(
     elif output_format == "json":
         write_json(rows, os.path.join(out_dir, "%s.%s.json" % (stem, target_lang)), texts, translated)
         output_files.append(os.path.join(out_dir, "%s.%s.json" % (stem, target_lang)))
+
+    # 翻译有失败行时，额外输出原文转录，保证识别结果不丢失
+    failed = int((stats or {}).get("failed", 0) or 0)
+    if failed:
+        src_path = os.path.join(out_dir, "%s.source.srt" % stem)
+        write_srt(rows, src_path, texts)
+        output_files.append(src_path)
+        log("  [警告] %d/%d 行翻译失败，已额外输出原文转录：%s" % (failed, len(texts), src_path))
     
     log("-" * 72)
     for i, (row, src, dst) in enumerate(zip(rows, texts, translated), 1):

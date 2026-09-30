@@ -224,12 +224,18 @@ class MonitoringConfig(BaseSettings):
 
 
 class SubAIConfig(BaseSettings):
-    """主配置类"""
+    """主配置类
+
+    说明（v3.1.1 修复）：
+    - 各分段配置（asr/llm/ocr/...）都是**独立的 BaseSettings**,只读取 os.environ,
+      不会继承这里的 env_file;因此 .env 必须**先注入进程环境**（见 _load_env_file）。
+    - extra="ignore":.env 里形如 SUBAI_LLM_MODE 的嵌套键对主类而言是"未知字段",
+      若不忽略会触发 extra_forbidden,导致**整个服务无法启动**。
+    """
     model_config = SettingsConfigDict(
         env_prefix="SUBAI_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False
+        extra="ignore",
+        case_sensitive=False,
     )
     
     # 子配置
@@ -345,6 +351,24 @@ class SubAIConfig(BaseSettings):
 # --------------------------------------------------------------------------- #
 # 全局配置实例
 # --------------------------------------------------------------------------- #
+
+_ENV_PATH = os.path.join(_project_root(), ".env")
+
+
+def _load_env_file() -> None:
+    """把项目根目录的 .env 注入 os.environ（不覆盖已存在的环境变量）。
+
+    这是让 .env 生效的唯一入口:分段配置是独立 BaseSettings,只认 os.environ。
+    """
+    try:
+        if os.path.isfile(_ENV_PATH):
+            from dotenv import load_dotenv
+            load_dotenv(_ENV_PATH, override=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_load_env_file()
 
 # 单例模式，全局共享配置
 config = SubAIConfig()

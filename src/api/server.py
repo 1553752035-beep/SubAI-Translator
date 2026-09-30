@@ -545,6 +545,9 @@ async def process_transcode_task(
             except Exception as e:
                 logger.warning("跨线程提交进度回调失败: %r", e)
 
+        # 收集翻译统计（术语命中 / 缓存命中 / 失败行数），用于区分完全成功、部分失败、翻译全失败
+        stats: dict = {}
+
         # 在线程池中执行同步的run_pipeline函数
         result = await main_loop.run_in_executor(
             None,  # 使用默认线程池
@@ -555,21 +558,48 @@ async def process_transcode_task(
                 target_lang=target_lang,
                 terms_file=terms_file,
                 output_format=output_format,
-                progress_callback=_thread_safe_progress_cb
+                progress_callback=_thread_safe_progress_cb,
+                stats=stats,
             )
         )
-        
-        # 更新任务状态为completed
-        await task_manager.update_task(
-            task_id=task_id,
-            status="completed",
-            progress=1.0,
-            message="任务完成",
-            result_files=result if isinstance(result, list) else []
-        )
-        REGISTRY.inc("subai_task_completed_total")
-        
-        logger.info(f"任务 {task_id} 处理完成，输出文件数: {len(result) if isinstance(result, list) else 0}")
+
+        files = result if isinstance(result, list) else []
+        failed = int(stats.get("failed", 0) or 0)
+        total = int(stats.get("total", 0) or 0)
+
+        if total and failed >= total:
+            # 翻译整体失败：任务标记失败，但保留识别结果（run_pipeline 已额外输出原文转录）
+            await task_manager.update_task(
+                task_id=task_id,
+                status="failed",
+                progress=1.0,
+                message="翻译全部失败，已保留原文转录",
+                error_message="翻译后端不可用：%d/%d 行翻译失败" % (failed, total),
+                result_files=files,
+            )
+            REGISTRY.inc("subai_task_failed_total")
+            logger.error("任务 %s 翻译全部失败（%d/%d）", task_id, failed, total)
+        elif failed:
+            await task_manager.update_task(
+                task_id=task_id,
+                status="completed",
+                progress=1.0,
+                message="完成（%d/%d 行未翻译，已保留原文）" % (failed, total),
+                result_files=files,
+            )
+            REGISTRY.inc("subai_task_completed_total")
+            logger.warning("任务 %s 部分翻译失败（%d/%d）", task_id, failed, total)
+        else:
+            await task_manager.update_task(
+                task_id=task_id,
+                status="completed",
+                progress=1.0,
+                message="任务完成",
+                result_files=files,
+            )
+            REGISTRY.inc("subai_task_completed_total")
+
+        logger.info(f"任务 {task_id} 处理完成，输出文件数: {len(files)}")
         
     except Exception as e:
         # 更新任务状态为failed
