@@ -8,6 +8,8 @@ CTranslate2 支持 + CUDA DLL 可用 + 显存充足 才走 cuda，否则安全�
 """
 from __future__ import annotations
 
+import os
+
 from src import config as config_mod
 from src.config import config
 
@@ -67,3 +69,11 @@ class TestDescribe:
 
     def test_cuda_dll_dirs_is_list(self):
         assert isinstance(config_mod.cuda_dll_dirs(), list)
+
+    def test_optional_gpu_pack_under_install_dir_is_detected(self, tmp_path, monkeypatch):
+        bin_dir = tmp_path / "cuda_dlls" / "cublas" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "cublas64_12.dll").write_bytes(b"x")
+        monkeypatch.setattr(config_mod, "_project_root", lambda: str(tmp_path))
+        found = config_mod.cuda_dll_dirs()
+        assert any(d.endswith(os.path.join("cublas", "bin")) for d in found)

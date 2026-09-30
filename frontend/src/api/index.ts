@@ -14,6 +14,7 @@ import type {
   LlmStatus,
   TaskSubtitles,
   SubtitleSegment,
+  AsrDeviceInfo,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -195,6 +196,11 @@ export const reloadConfig = async () => {
 export const getLlmStatus = async (): Promise<LlmStatus> => {
   const response = await api.get('/llm/status');
   return response.data as LlmStatus;
+};
+
+export const getAsrDevice = async (): Promise<AsrDeviceInfo> => {
+  const response = await api.get('/system/asr-device');
+  return response.data as AsrDeviceInfo;
 };
 
 export const testLlm = async (mode?: string) => {

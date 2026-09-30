@@ -151,3 +151,13 @@ export interface TaskSubtitles {
   file: string;
   segments: SubtitleSegment[];
 }
+
+// ASR 设备信息（GET /api/system/asr-device）
+export interface AsrDeviceInfo {
+  configured: string;
+  effective_device: 'cuda' | 'cpu';
+  compute_type: string;
+  ct2_cuda_supported: boolean;
+  cuda_dll_dirs: string[];
+  free_vram_gb: number | null;
+}

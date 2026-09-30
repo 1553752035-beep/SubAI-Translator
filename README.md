@@ -110,6 +110,9 @@ cuda_dlls/
 
 - 当前生效设备与判定依据可通过 `GET /api/system/asr-device` 查看，或看日志里的 `[ASR]` 行。
 
+- 自检：`.venv\\Scripts\\python.exe tools\\check_gpu.py --load`（报告判定依据并真实加载一次模型）。
+- 生成可选 GPU 包（**不联网**，从本机已安装的 nvidia-* 运行库复制）：`powershell -ExecutionPolicy Bypass -File tools\\build_gpu_pack.ps1`，然后把生成的 `cuda_dlls` 放到 exe 同级目录。
+
 ## 许可证
 
 本项目采用 **MIT** 许可证，详见 [LICENSE](LICENSE)。

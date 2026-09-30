@@ -3,6 +3,7 @@ import {
   changePassword,
   checkHealth,
   clearCache,
+  getAsrDevice,
   getCacheStats,
   getCurrentUser,
   getLlmStatus,
@@ -10,7 +11,7 @@ import {
   setLlmMode,
   testLlm,
 } from '../api';
-import type { CacheStats, LlmStatus, QueueStats, UserInfo } from '../types';
+import type { AsrDeviceInfo, CacheStats, LlmStatus, QueueStats, UserInfo } from '../types';
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -24,6 +25,7 @@ function Row({ label, value }: { label: string; value: string }) {
 export function SettingsPage() {
   const [me, setMe] = useState<UserInfo | null>(null);
   const [health, setHealth] = useState<any>(null);
+  const [asr, setAsr] = useState<AsrDeviceInfo | null>(null);
   const [llm, setLlm] = useState<LlmStatus | null>(null);
   const [cache, setCache] = useState<CacheStats | null>(null);
   const [queue, setQueue] = useState<QueueStats | null>(null);
@@ -43,6 +45,7 @@ export function SettingsPage() {
     setMsg('');
     try { setMe(await getCurrentUser()); } catch { /* 忽略 */ }
     try { setHealth(await checkHealth()); } catch { setHealth(null); }
+    try { setAsr(await getAsrDevice()); } catch { setAsr(null); }
     try {
       const s = await getLlmStatus();
       setLlm(s);
@@ -134,6 +137,24 @@ export function SettingsPage() {
             <Row label="ASR 设备" value={health ? String(health.asr_device) : '-'} />
             <Row label="队列" value={qs ? (String(qs.running_count) + ' 运行 / ' + String(qs.queue_size) + ' 等待（上限 ' + String(qs.max_queue_size) + '）') : '-'} />
             <Row label="当前账号" value={me ? (me.username + ' / ' + me.role) : '-'} />
+          </div>
+        </div>
+
+        <div className="table-card">
+          <div className="table-head"><div className="t">语音识别设备（ASR）</div></div>
+          <div className="set-body">
+            <Row label="配置值" value={asr ? asr.configured : '-'} />
+            <Row label="实际生效" value={asr ? (asr.effective_device + ' / ' + asr.compute_type) : '-'} />
+            <Row label="CTranslate2 CUDA" value={asr ? (asr.ct2_cuda_supported ? '支持' : '不支持') : '-'} />
+            <Row
+              label="空闲显存"
+              value={asr && asr.free_vram_gb != null ? (asr.free_vram_gb.toFixed(1) + ' GB') : '未知'}
+            />
+            <Row label="CUDA DLL 目录" value={asr ? (String(asr.cuda_dll_dirs.length) + ' 个') : '-'} />
+            <div className="set-hint">
+              判定规则：CTranslate2 支持 CUDA 且 能找到 CUDA DLL 且 空闲显存 ≥4GB，才会使用 GPU，否则安全回落 CPU。
+              绿色版主包不含 CUDA 运行库（约 2.0 GB），可用 tools/build_gpu_pack.ps1 生成可选 GPU 包后放入安装目录。
+            </div>
           </div>
         </div>
 
