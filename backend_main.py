@@ -16,6 +16,20 @@ from src.api.server import app
 from src.config import config
 
 
+def _ssl_kwargs() -> dict:
+    """HTTPS 配置（三期安全加固）。
+
+    打包入口同样必须遵守 SUBAI_SECURITY_ENABLE_HTTPS，
+    否则「HTTPS 正常启用」只在直接运行 src/api/server.py 时生效。
+    """
+    if config.security.enable_https and config.security.ssl_certfile:
+        return {
+            "ssl_certfile": config.security.ssl_certfile,
+            "ssl_keyfile": config.security.ssl_keyfile or None,
+        }
+    return {}
+
+
 if __name__ == "__main__":
     uvicorn.run(
         app,
@@ -23,4 +37,5 @@ if __name__ == "__main__":
         port=config.server.port,
         reload=False,
         log_level="info",
+        **_ssl_kwargs(),
     )

@@ -4,34 +4,107 @@ import type {
   TranscodeResult,
   UploadResult,
   TaskRecord,
-  TerminologyRecord,
+  HistoryResponse,
+  TerminologyListResponse,
+  TerminologyInput,
   CacheStats,
   QueueStats,
+  LoginResult,
+  UserInfo,
+  LlmStatus,
+  TaskSubtitles,
+  SubtitleSegment,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
+const TOKEN_KEY = 'subai_access_token';
 
-const api = axios.create({
+// --------------------------------------------------------------------------- //
+// 令牌存取（登录页与拦截器共用；后端所有业务接口都需要它）
+// --------------------------------------------------------------------------- //
+
+export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
+
+export const setToken = (token: string): void => localStorage.setItem(TOKEN_KEY, token);
+
+export const clearToken = (): void => localStorage.removeItem(TOKEN_KEY);
+
+export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
-// 健康检查
+// 附加 Bearer 令牌；未登录时不附加，由后端返回 401
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 401 统一清理令牌并广播，由 App 切回登录页
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      clearToken();
+      window.dispatchEvent(new Event('subai:unauthorized'));
+    }
+    return Promise.reject(error);
+  },
+);
+
+// --------------------------------------------------------------------------- //
+// 认证
+// --------------------------------------------------------------------------- //
+
+export const login = async (username: string, password: string): Promise<LoginResult> => {
+  const response = await api.post('/auth/login', { username, password });
+  const data = response.data as LoginResult;
+  setToken(data.access_token);
+  return data;
+};
+
+export const register = async (
+  username: string,
+  password: string,
+  email?: string,
+): Promise<UserInfo> => {
+  const response = await api.post('/auth/register', { username, password, email });
+  return response.data.user as UserInfo;
+};
+
+export const getCurrentUser = async (): Promise<UserInfo> => {
+  const response = await api.get('/auth/me');
+  return response.data as UserInfo;
+};
+
+export const changePassword = async (oldPassword: string, newPassword: string) => {
+  const response = await api.post('/auth/change-password', {
+    old_password: oldPassword,
+    new_password: newPassword,
+  });
+  return response.data;
+};
+
+export const logout = (): void => clearToken();
+
+// --------------------------------------------------------------------------- //
+// 健康检查与任务
+// --------------------------------------------------------------------------- //
+
 export const checkHealth = async () => {
   const response = await api.get('/health');
   return response.data;
 };
 
-// 提交转码任务
 export const submitTranscodeTask = async (requestData: TranscodeRequest): Promise<TranscodeResult> => {
   const response = await api.post('/transcode', requestData);
   return response.data as TranscodeResult;
 };
 
-// 上传视频文件（multipart/form-data），返回 { filename, video_path, size_bytes }
 export const uploadVideoFile = async (file: File): Promise<UploadResult> => {
   const formData = new FormData();
   formData.append('file', file);
@@ -42,67 +115,124 @@ export const uploadVideoFile = async (file: File): Promise<UploadResult> => {
   return response.data as UploadResult;
 };
 
-// 查询任务状态
-export const getTaskStatus = async (taskId: string) => {
+export const getTaskStatus = async (taskId: string): Promise<TaskRecord> => {
   const response = await api.get(`/task/${taskId}`);
   return response.data as TaskRecord;
 };
 
-// 查询历史记录
-export const getHistory = async (params?: { video_name?: string; status?: string; limit?: number }) => {
+export const cancelTask = async (taskId: string) => {
+  const response = await api.delete(`/task/${taskId}`);
+  return response.data;
+};
+
+// 后端返回 { tasks, total }，不是数组
+export const getHistory = async (params?: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<HistoryResponse> => {
   const response = await api.get('/history', { params });
-  return response.data as TaskRecord[];
+  return response.data as HistoryResponse;
 };
 
-// 下载输出文件
-export const downloadFile = (filename: string) => {
-  return `${API_BASE_URL.replace('/api', '')}/output/${filename}`;
+export const getTerminologyList = async (params?: {
+  category?: string;
+  priority?: string;
+  keyword?: string;
+  limit?: number;
+}): Promise<TerminologyListResponse> => {
+  const response = await api.get('/terminology', { params });
+  return response.data as TerminologyListResponse;
 };
 
-// 添加术语
-export const addTerminology = async (term: Omit<TerminologyRecord, 'id' | 'created_at'>) => {
+export const addTerminology = async (term: TerminologyInput) => {
   const response = await api.post('/terminology', term);
   return response.data;
 };
 
-// 查询术语列表
-export const getTerminologyList = async (params?: { source_lang?: string; target_lang?: string }) => {
-  const response = await api.get('/terminology', { params });
-  return response.data as TerminologyRecord[];
+export const deleteTerminology = async (source: string) => {
+  const response = await api.delete(`/terminology/${encodeURIComponent(source)}`);
+  return response.data;
 };
 
-// 导入术语
-export const importTerminology = async (filePath: string) => {
+export const importTerminology = async (file: File) => {
   const formData = new FormData();
-  formData.append('file', filePath);
+  formData.append('file', file);
   const response = await api.post('/terminology/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
 };
 
-// 查询缓存统计
-export const getCacheStats = async () => {
+// --------------------------------------------------------------------------- //
+// 缓存 / 队列 / 配置（管理员）
+// --------------------------------------------------------------------------- //
+
+export const getCacheStats = async (): Promise<CacheStats> => {
   const response = await api.get('/cache/stats');
   return response.data as CacheStats;
 };
 
-// 清空缓存
 export const clearCache = async () => {
   const response = await api.post('/cache/clear');
   return response.data;
 };
 
-// 查询队列统计
-export const getQueueStats = async () => {
+export const getQueueStats = async (): Promise<QueueStats> => {
   const response = await api.get('/queue/stats');
   return response.data as QueueStats;
 };
 
-// 重载配置
 export const reloadConfig = async () => {
   const response = await api.post('/config/reload');
   return response.data;
+};
+
+// --------------------------------------------------------------------------- //
+// 翻译后端状态与切换
+// --------------------------------------------------------------------------- //
+
+export const getLlmStatus = async (): Promise<LlmStatus> => {
+  const response = await api.get('/llm/status');
+  return response.data as LlmStatus;
+};
+
+export const testLlm = async (mode?: string) => {
+  const response = await api.post('/llm/test', { mode }, { timeout: 40000 });
+  return response.data;
+};
+
+export const setLlmMode = async (
+  mode: string,
+  opts?: { cloud_url?: string; cloud_model?: string; cloud_api_key?: string },
+): Promise<LlmStatus> => {
+  const response = await api.post('/llm/mode', { mode, ...opts });
+  return response.data as LlmStatus;
+};
+
+// --------------------------------------------------------------------------- //
+// 字幕读取 / 写回
+// --------------------------------------------------------------------------- //
+
+export const getTaskSubtitles = async (taskId: string): Promise<TaskSubtitles> => {
+  const response = await api.get('/task/' + taskId + '/subtitles');
+  return response.data as TaskSubtitles;
+};
+
+export const saveTaskSubtitles = async (taskId: string, segments: SubtitleSegment[]) => {
+  const response = await api.post('/task/' + taskId + '/subtitles', { segments });
+  return response.data;
+};
+
+// 用 axios 带令牌下载输出文件（直接 a[href] 不会带 Authorization）
+export const downloadOutput = async (filename: string): Promise<void> => {
+  const response = await api.get('/output/' + encodeURIComponent(filename), { responseType: 'blob' });
+  const url = URL.createObjectURL(response.data as Blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 export default api;

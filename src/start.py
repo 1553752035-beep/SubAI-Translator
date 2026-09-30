@@ -47,23 +47,29 @@ def check_environment():
 
 
 def start_api_server():
-    """启动FastAPI服务器"""
+    """启动FastAPI服务器（遵守 config 中的 host/port 与 HTTPS 设置）"""
+    from src.config import config as _cfg
+
+    scheme = "https" if (_cfg.security.enable_https and _cfg.security.ssl_certfile) else "http"
     print("\n启动FastAPI服务器...")
-    print("API文档: http://localhost:8000/docs")
+    print("API文档: %s://localhost:%d/docs" % (scheme, _cfg.server.port))
     print("\n按 Ctrl+C 停止服务\n")
-    
-    # 启动uvicorn
-    subprocess.run(
-        [
-            sys.executable, "-m", "uvicorn",
-            "src.api.server:app",
-            "--host", "0.0.0.0",
-            "--port", "8000",
-            "--reload",
-            "--log-level", "info"
-        ],
-        cwd=ROOT
-    )
+
+    cmd = [
+        sys.executable, "-m", "uvicorn",
+        "src.api.server:app",
+        "--host", _cfg.server.host,
+        "--port", str(_cfg.server.port),
+        "--reload",
+        "--log-level", "info",
+    ]
+    # HTTPS（三期安全加固）：仅在启用且提供证书时附加
+    if _cfg.security.enable_https and _cfg.security.ssl_certfile:
+        cmd += ["--ssl-certfile", _cfg.security.ssl_certfile]
+        if _cfg.security.ssl_keyfile:
+            cmd += ["--ssl-keyfile", _cfg.security.ssl_keyfile]
+
+    subprocess.run(cmd, cwd=ROOT)
 
 
 if __name__ == "__main__":

@@ -55,11 +55,20 @@ def main():
     print(f"  重载: {reload}")
     print()
     
+    ssl_kwargs = {}
+    if config.security.enable_https and config.security.ssl_certfile:
+        ssl_kwargs = {
+            "ssl_certfile": config.security.ssl_certfile,
+            "ssl_keyfile": config.security.ssl_keyfile or None,
+        }
+        print(f"  HTTPS: 已启用 ({config.security.ssl_certfile})")
+
     uvicorn.run(
         "src.api.server:app",
         host=host,
         port=port,
-        reload=reload
+        reload=reload,
+        **ssl_kwargs
     )
 
 

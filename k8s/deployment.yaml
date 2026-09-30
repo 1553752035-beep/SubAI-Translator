@@ -1,0 +1,84 @@
+# SubAI Translator —— 后端 Deployment
+# 说明：
+#   - 镜像需先构建并推送到镜像仓库（默认标签 subai-backend:latest）；
+#   - ASR 模型按只读方式挂载到 /app/models；
+#   - 数据与输出挂载 PVC，实现跨 Pod 重建持久化；
+#   - 就绪探针依赖 /api/health。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subai-backend
+  namespace: subai
+  labels:
+    app: subai-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: subai-backend
+  template:
+    metadata:
+      labels:
+        app: subai-backend
+    spec:
+      # ASR / OCR 为 CPU 密集 + 内存敏感型负载，生产建议固定到有充足资源的工作节点
+      # nodeSelector:
+      #   workload: inference
+      containers:
+        - name: subai-backend
+          image: subai-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: subai-backend-config
+            - secretRef:
+                name: subai-backend-secret
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: models
+              mountPath: /app/models
+              readOnly: true
+            - name: output
+              mountPath: /app/output
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: subai-data-pvc
+        - name: models
+          persistentVolumeClaim:
+            claimName: subai-models-pvc
+        - name: output
+          emptyDir: {}

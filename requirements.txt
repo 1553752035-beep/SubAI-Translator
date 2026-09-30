@@ -21,6 +21,8 @@ faster-whisper>=1.0
 # ---------------- OCR 硬字幕识别 ----------------
 rapidocr-onnxruntime>=1.3
 opencv-python>=4.8
+# 安全修复：Pillow < 12.3.0 存在多个已知漏洞（pip-audit 扫描结果，2026-09-29）
+pillow>=12.3.0
 
 # ---------------- GPU 加速（可选，有 NVIDIA GPU 时启用）----------------
 # torch>=2.1

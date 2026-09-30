@@ -1,0 +1,63 @@
+# =============================================================================
+# SubAI Translator —— Docker Compose 一键启动（三期：容器化部署）
+# =============================================================================
+# 用法：
+#   1) 复制 .env.example 为 .env 并按需修改密钥/密码；
+#   2) 确保本地有 ASR 模型（./models/faster-whisper-small）；
+#   3) 启动：docker compose up -d --build
+#   4) 验证：http://localhost:8000/docs
+#
+# 本地 LLM（koboldcpp）默认通过 host.docker.internal 访问宿主机 5001 端口；
+# 如 LLM 运行在远程/其他容器，请修改 SUBAI_LLM_LOCAL_URL 或 SUBAI_LLM_MODE=cloud。
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: subai-backend:latest
+    container_name: subai-backend
+    restart: unless-stopped
+
+    ports:
+      - "${SUBAI_SERVER_PORT:-8000}:8000"
+
+    environment:
+      SUBAI_SERVER_HOST: "0.0.0.0"
+      SUBAI_SERVER_PORT: "8000"
+      SUBAI_LOG_LEVEL: "${SUBAI_LOG_LEVEL:-INFO}"
+
+      # 翻译服务：local（默认，本地 koboldcpp）/ cloud / hybrid
+      SUBAI_LLM_MODE: "${SUBAI_LLM_MODE:-local}"
+      SUBAI_LLM_LOCAL_URL: "${SUBAI_LLM_LOCAL_URL:-http://host.docker.internal:5001/v1/chat/completions}"
+      SUBAI_LLM_LOCAL_MODEL: "${SUBAI_LLM_LOCAL_MODEL:-koboldcpp}"
+
+      # 安全（生产环境务必通过 .env 覆盖）
+      SUBAI_AUTH_JWT_SECRET: "${SUBAI_AUTH_JWT_SECRET:-please-change-me-in-production}"
+      SUBAI_AUTH_ADMIN_USERNAME: "${SUBAI_AUTH_ADMIN_USERNAME:-admin}"
+      SUBAI_AUTH_ADMIN_PASSWORD: "${SUBAI_AUTH_ADMIN_PASSWORD:-admin123}"
+
+      # 备份
+      SUBAI_BACKUP_ENABLED: "${SUBAI_BACKUP_ENABLED:-true}"
+      SUBAI_BACKUP_AUTO_BACKUP_INTERVAL_HOURS: "${SUBAI_BACKUP_AUTO_BACKUP_INTERVAL_HOURS:-24}"
+
+    volumes:
+      # SQLite 数据库 / 上传文件持久化
+      - ./data:/app/data
+      # ASR 模型（faster-whisper-small），启动前请放置于宿主机 ./models
+      - ./models:/app/models
+      # 字幕输出持久化
+      - ./output:/app/output
+
+    # 让容器内的 host.docker.internal 指向宿主机（访问本地 koboldcpp）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # 资源限制（生产建议），避免单个服务打满宿主机
+    deploy:
+      resources:
+        limits:
+          memory: 16g
+        reservations:
+          memory: 2g

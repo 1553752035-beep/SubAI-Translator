@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { getHistory } from '../api';
+import { cancelTask, getHistory } from '../api';
+import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
 
 // 任务状态徽章
@@ -49,12 +50,13 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
       zIndex: 1000,
     }} onClick={onClose}>
       <div style={{
-        backgroundColor: '#fff',
+        backgroundColor: 'var(--bg)',
+        border: '1px solid var(--border)',
         borderRadius: '12px',
         padding: '24px',
-        maxWidth: '600px',
-        width: '90%',
-        maxHeight: '80vh',
+        maxWidth: '1100px',
+        width: '94%',
+        maxHeight: '88vh',
         overflow: 'auto',
       }} onClick={e => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>任务详情</h3>
@@ -68,10 +70,10 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
           <div><strong>状态:</strong> <StatusBadge status={task.status} /></div>
           <div><strong>进度:</strong> {Math.round(task.progress * 100)}%</div>
           <div><strong>消息:</strong> {task.message}</div>
-          <div><strong>创建时间:</strong> {new Date(task.created_at * 1000).toLocaleString()}</div>
-          <div><strong>更新时间:</strong> {new Date(task.updated_at * 1000).toLocaleString()}</div>
+          <div><strong>创建时间:</strong> {new Date(task.created_at).toLocaleString()}</div>
+          <div><strong>更新时间:</strong> {new Date(task.updated_at).toLocaleString()}</div>
           {task.completed_at && (
-            <div><strong>完成时间:</strong> {new Date(task.completed_at * 1000).toLocaleString()}</div>
+            <div><strong>完成时间:</strong> {new Date(task.completed_at).toLocaleString()}</div>
           )}
           {task.error_message && (
             <div style={{ color: '#f44336' }}>
@@ -89,20 +91,19 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
             </div>
           )}
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            marginTop: '16px',
-            padding: '8px 24px',
-            backgroundColor: '#667eea',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-          }}
-        >
-          关闭
-        </button>
+        <div style={{ marginTop: '18px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+          <h4 style={{ margin: '0 0 10px', fontSize: '14px' }}>字幕内容</h4>
+          {task.status === 'completed' ? (
+            <SubtitleEditor taskId={task.task_id} />
+          ) : (
+            <div style={{ color: 'var(--text-dim)', fontSize: '13px' }}>
+              任务完成后可在此查看与编辑字幕（当前状态：{task.status}）。
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <button className="btn" onClick={onClose} style={{ marginTop: '16px' }}>关闭</button>
+        </div>
       </div>
     </div>
   );
@@ -120,7 +121,7 @@ export function TasksPage() {
     const loadTasks = async () => {
       try {
         const data = await getHistory({ limit: 100 });
-        setTasks(data);
+        setTasks(data.tasks);
       } catch (error) {
         console.error('加载任务列表失败:', error);
       } finally {
@@ -131,12 +132,37 @@ export function TasksPage() {
     loadTasks();
   }, []);
 
+  // 静默轮询，让进行中的任务状态自动更新
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const data = await getHistory({ limit: 100 });
+          setTasks(data.tasks);
+        } catch {
+          /* 忽略瞬时失败 */
+        }
+      })();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 取消排队/处理中的任务
+  const handleCancel = async (taskId: string) => {
+    try {
+      await cancelTask(taskId);
+      await handleRefresh();
+    } catch (error) {
+      console.error('取消失败:', error);
+    }
+  };
+
   // 刷新任务列表
   const handleRefresh = async () => {
     setLoading(true);
     try {
       const data = await getHistory({ limit: 100 });
-      setTasks(data);
+      setTasks(data.tasks);
     } catch (error) {
       console.error('刷新任务列表失败:', error);
     } finally {
@@ -209,7 +235,7 @@ export function TasksPage() {
           textAlign: 'center',
           padding: '60px 0',
           color: 'var(--text-dim)',
-          backgroundColor: '#fff',
+          backgroundColor: 'var(--panel)',
           borderRadius: '12px',
         }}>
           暂无任务记录
@@ -238,15 +264,14 @@ export function TasksPage() {
                   <td>{task.output_format.toUpperCase()}</td>
                   <td><StatusBadge status={task.status} /></td>
                   <td>{Math.round(task.progress * 100)}%</td>
-                  <td>{new Date(task.created_at * 1000).toLocaleDateString()}</td>
+                  <td>{new Date(task.created_at).toLocaleDateString()}</td>
                   <td>
-                    <button
-                      className="btn"
-                      onClick={() => setSelectedTask(task)}
-                      style={{ padding: '4px 12px', fontSize: '12px' }}
-                    >
-                      详情
-                    </button>
+                    <div className="row-actions">
+                      <button className="btn" onClick={() => setSelectedTask(task)}>详情 / 字幕</button>
+                      {(task.status === 'pending' || task.status === 'processing') && (
+                        <button className="btn" onClick={() => void handleCancel(task.task_id)}>取消</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

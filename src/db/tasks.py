@@ -49,7 +49,8 @@ class TaskRecord:
         created_at: Optional[float] = None,
         updated_at: Optional[float] = None,
         completed_at: Optional[float] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        user_id: Optional[str] = None
     ):
         self.task_id = task_id
         self.video_path = video_path
@@ -66,6 +67,7 @@ class TaskRecord:
         self.updated_at = updated_at or time.time()
         self.completed_at = completed_at
         self.error_message = error_message
+        self.user_id = user_id
     
     def to_dict(self) -> dict:
         """转换为字典（用于API响应）"""
@@ -84,7 +86,8 @@ class TaskRecord:
             "created_at": datetime.fromtimestamp(self.created_at).isoformat(),
             "updated_at": datetime.fromtimestamp(self.updated_at).isoformat(),
             "completed_at": datetime.fromtimestamp(self.completed_at).isoformat() if self.completed_at else None,
-            "error_message": self.error_message
+            "error_message": self.error_message,
+            "user_id": self.user_id
         }
 
 
@@ -135,9 +138,16 @@ class TaskManager:
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 completed_at REAL,
-                error_message TEXT
+                error_message TEXT,
+                user_id TEXT
             )
         """)
+        
+        # 迁移：旧库无 user_id 列时补齐（三期数据隔离）
+        cursor = await self._db.execute("PRAGMA table_info(tasks)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "user_id" not in columns:
+            await self._db.execute("ALTER TABLE tasks ADD COLUMN user_id TEXT")
         
         # 创建索引（加速查询）
         await self._db.execute("""
@@ -151,6 +161,10 @@ class TaskManager:
         await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_tasks_video_path 
             ON tasks(video_path)
+        """)
+        await self._db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tasks_user_id 
+            ON tasks(user_id)
         """)
         
         await self._db.commit()
@@ -177,7 +191,8 @@ class TaskManager:
         source_lang: Optional[str] = None,
         target_lang: str = "en",
         output_format: str = "srt",
-        terms_file: Optional[str] = None
+        terms_file: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> TaskRecord:
         """
         创建新任务
@@ -190,6 +205,7 @@ class TaskManager:
             target_lang: 目标语言
             output_format: 输出格式
             terms_file: 术语库文件
+            user_id: 所属用户ID（三期数据隔离，None 表示系统任务）
         
         Returns:
             TaskRecord: 创建的任务记录
@@ -207,30 +223,45 @@ class TaskManager:
             progress=0.0,
             message="任务已创建，等待处理",
             created_at=now,
-            updated_at=now
+            updated_at=now,
+            user_id=user_id
         )
         
         await self._db.execute(
             """INSERT INTO tasks 
                (task_id, video_path, mode, source_lang, target_lang, output_format, 
-                terms_file, status, progress, message, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                terms_file, status, progress, message, created_at, updated_at, user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.task_id, record.video_path, record.mode, record.source_lang,
                 record.target_lang, record.output_format, record.terms_file,
                 record.status, record.progress, record.message,
-                record.created_at, record.updated_at
+                record.created_at, record.updated_at, record.user_id
             )
         )
         await self._db.commit()
         
         return record
     
-    async def get_task(self, task_id: str) -> Optional[TaskRecord]:
-        """查询任务"""
-        cursor = await self._db.execute(
-            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
-        )
+    async def get_task(
+        self, task_id: str, user_id: Optional[str] = None
+    ) -> Optional[TaskRecord]:
+        """
+        查询任务
+        
+        Args:
+            task_id: 任务ID
+            user_id: 数据隔离过滤（None 表示不过滤，供 admin/内部调用）
+        """
+        if user_id is None:
+            cursor = await self._db.execute(
+                "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT * FROM tasks WHERE task_id = ? AND user_id = ?",
+                (task_id, user_id)
+            )
         row = await cursor.fetchone()
         
         if not row:
@@ -319,6 +350,7 @@ class TaskManager:
         self,
         status: Optional[str] = None,
         video_path: Optional[str] = None,
+        user_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
     ) -> list[TaskRecord]:
@@ -328,6 +360,7 @@ class TaskManager:
         Args:
             status: 按状态过滤
             video_path: 按视频路径过滤
+            user_id: 数据隔离过滤（None 表示不过滤，供 admin/内部调用）
             limit: 返回数量限制
             offset: 偏移量
         
@@ -344,6 +377,10 @@ class TaskManager:
         if video_path:
             sql += " AND video_path LIKE ?"
             params.append(f"%{video_path}%")
+        
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(user_id)
         
         sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
@@ -390,6 +427,19 @@ class TaskManager:
         
         return stats
     
+    async def count_active_tasks(self, user_id: str) -> int:
+        """
+        统计某用户的活跃任务数（pending + processing）
+
+        用于配额限制（三期数据隔离 + 配额管理）。
+        """
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status IN ('pending', 'processing')",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0]
+    
     # ----------------------------------------------------------------------- #
     # 工具方法
     # ----------------------------------------------------------------------- #
@@ -418,7 +468,8 @@ class TaskManager:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
-            error_message=row["error_message"]
+            error_message=row["error_message"],
+            user_id=row["user_id"] if "user_id" in row.keys() else None
         )
 
 
@@ -446,7 +497,10 @@ async def get_task_manager(db_path: Optional[str] = None) -> TaskManager:
     """
     global task_manager
     if task_manager is None:
-        db_path = db_path or DEFAULT_TASKS_DB
+        if db_path is None:
+            # 优先使用配置路径（便于测试/部署隔离），回退到默认值
+            from src.config import config
+            db_path = config.tasks_db or DEFAULT_TASKS_DB
         task_manager = TaskManager(db_path)
         await task_manager.initialize()
     return task_manager

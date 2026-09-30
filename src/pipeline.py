@@ -38,7 +38,7 @@ if ROOT not in sys.path:
 
 from src.db.terminology import TerminologyManager
 from src.config import config as _cfg
-from src.cache.translation_cache import get_translation_cache
+from src.cache.translation_cache import TranslationCache
 from src.retry import retry, RetryExhausted
 
 # 常量定义（统一从 config 读取，避免硬编码路径；保留模块级常量便于外部引用）
@@ -215,7 +215,20 @@ def hardsub_segments(video: str, sample_fps: Optional[float] = None,
                 res, _ = engine(frame)
                 ocr_calls += 1
                 if res:
-                    parts = [t for _, t, s in res if s >= min_score and t.strip()]
+                    parts = []
+                    for item in res:
+                        # 兼容不同 RapidOCR 版本的返回格式 [box, text, score]，
+                        # score 可能是 str / float / numpy 标量
+                        try:
+                            _box, _text, _score = item
+                        except (TypeError, ValueError):
+                            continue
+                        try:
+                            _score = float(_score)
+                        except (TypeError, ValueError):
+                            _score = 0.0
+                        if _score >= min_score and _text and str(_text).strip():
+                            parts.append(str(_text))
                     text = " ".join(parts).strip()
                     if text:
                         raw.append((idx / fps, _norm(text)))
@@ -337,7 +350,12 @@ def translate(
 
     二期增强：
     - 翻译缓存：每个源文先查 cache，命中直接返回；翻译成功后写入 cache
-    - 异步缓存实例（get_translation_cache）在线程池中安全使用
+
+    三期修复：
+    - 缓存实例与事件循环在单次调用内一一对应。run_pipeline 运行在线程池中，
+      而 aiosqlite 连接必须固定在同一事件循环内使用，跨循环复用连接不安全；
+      这里为每次调用新建独立缓存实例 + 独立事件循环，并在 finally 中统一关闭，
+      既消除跨循环隐患，也避免每个缓存操作都新建/销毁事件循环。
     """
     t0 = time.time()
     out: list[str] = [""] * len(texts)
@@ -350,100 +368,109 @@ def translate(
         else:
             todo.append(i)
 
-    # ---------- 二期新增：缓存层 ----------
     cache_hits = 0
     todo_after_cache: list[int] = []
-    cache_obj = None
+    cache_obj: Optional[TranslationCache] = None
+    cache_loop: Optional[asyncio.AbstractEventLoop] = None
+
     if use_cache and todo:
         try:
-            cache_obj = asyncio.run(get_translation_cache(_cfg.cache_db_path))
-        except RuntimeError:
-            # 已有运行中事件循环——退回同步缓存或跳过
+            cache_loop = asyncio.new_event_loop()
+            cache_obj = TranslationCache(
+                _cfg.cache_db_path,
+                max_entries=_cfg.cache.max_entries,
+                ttl_days=_cfg.cache.ttl_days,
+            )
+            cache_loop.run_until_complete(cache_obj.initialize())
+        except Exception as e:
+            log("  [缓存] 初始化失败，本次跳过缓存: %r" % e)
             cache_obj = None
+            if cache_loop is not None:
+                cache_loop.close()
+                cache_loop = None
 
-        for i in todo:
-            src = texts[i]
-            cached = None
-            if cache_obj is not None:
+    try:
+        if cache_obj is not None and cache_loop is not None:
+            for i in todo:
+                cached = None
                 try:
-                    # aiosqlite 是异步的；同步上下文下用 run_until_complete
-                    loop = asyncio.new_event_loop()
-                    try:
-                        cached = loop.run_until_complete(cache_obj.get(src, target))
-                    finally:
-                        loop.close()
+                    cached = cache_loop.run_until_complete(cache_obj.get(texts[i], target))
                 except Exception as e:
                     log("  [缓存] 查询失败: %r" % e)
                     cached = None
-            if cached:
-                out[i] = cached
-                cache_hits += 1
-            else:
-                todo_after_cache.append(i)
-    else:
-        todo_after_cache = list(todo)
+                if cached:
+                    out[i] = cached
+                    cache_hits += 1
+                else:
+                    todo_after_cache.append(i)
+        else:
+            todo_after_cache = list(todo)
 
-    n_batch = 0
-    total_batches = (len(todo_after_cache) + batch_size - 1) // batch_size if todo_after_cache else 0
-    current_batch = 0
+        n_batch = 0
+        total_batches = (len(todo_after_cache) + batch_size - 1) // batch_size if todo_after_cache else 0
+        current_batch = 0
 
-    for s in range(0, len(todo_after_cache), batch_size):
-        idxs = todo_after_cache[s:s + batch_size]
-        block = "\n".join("%d. %s" % (n + 1, texts[i]) for n, i in enumerate(idxs))
-        prompt = ("Translate each numbered Chinese subtitle line into %s. "
-                  "Keep the same numbering, one line per input line, "
-                  "output nothing else.\n\n%s" % (target, block))
+        for s in range(0, len(todo_after_cache), batch_size):
+            idxs = todo_after_cache[s:s + batch_size]
+            block = "\n".join("%d. %s" % (n + 1, texts[i]) for n, i in enumerate(idxs))
+            prompt = ("Translate each numbered Chinese subtitle line into %s. "
+                      "Keep the same numbering, one line per input line, "
+                      "output nothing else.\n\n%s" % (target, block))
 
-        try:
-            raw = _call_llm(prompt, target)
-            n_batch += 1
-            current_batch += 1
+            try:
+                raw = _call_llm(prompt, target)
+                n_batch += 1
+                current_batch += 1
 
-            got = {}
-            for line in raw.splitlines():
-                m = re.match(r"^\s*(\d+)\s*[.、)]\s*(.+?)\s*$", line)
-                if m:
-                    got[int(m.group(1))] = m.group(2).strip()
+                got = {}
+                for line in raw.splitlines():
+                    m = re.match(r"^\s*(\d+)\s*[.、)]\s*(.+?)\s*$", line)
+                    if m:
+                        got[int(m.group(1))] = m.group(2).strip()
 
-            if len(got) >= len(idxs):
-                for n, i in enumerate(idxs):
-                    out[i] = got.get(n + 1, "")
-            else:
+                if len(got) >= len(idxs):
+                    for n, i in enumerate(idxs):
+                        out[i] = got.get(n + 1, "")
+                else:
+                    for i in idxs:
+                        out[i] = _call_llm(texts[i], target)
+                        n_batch += 1
+            except Exception as e:
+                log("  [翻译] 批量请求失败(%r)，退回逐行" % e)
                 for i in idxs:
                     out[i] = _call_llm(texts[i], target)
                     n_batch += 1
-        except Exception as e:
-            log("  [翻译] 批量请求失败(%r)，退回逐行" % e)
-            for i in idxs:
-                out[i] = _call_llm(texts[i], target)
-                n_batch += 1
 
-        # ---------- 二期新增：翻译成功后写入缓存 ----------
-        if use_cache and cache_obj is not None:
-            for i in idxs:
-                if out[i] and not out[i].startswith("[翻译失败"):
-                    try:
-                        loop = asyncio.new_event_loop()
+            # 翻译成功后写入缓存（与查询共用同一事件循环）
+            if cache_obj is not None and cache_loop is not None:
+                for i in idxs:
+                    if out[i] and not out[i].startswith("[翻译失败"):
                         try:
-                            loop.run_until_complete(cache_obj.set(texts[i], target, out[i]))
-                        finally:
-                            loop.close()
-                    except Exception as e:
-                        log("  [缓存] 写入失败: %r" % e)
+                            cache_loop.run_until_complete(cache_obj.set(texts[i], target, out[i]))
+                        except Exception as e:
+                            log("  [缓存] 写入失败: %r" % e)
 
-        # 进度回调
-        if progress_callback and total_batches > 0:
-            progress = 0.6 + (current_batch / total_batches) * 0.35
-            progress_callback(progress, f"翻译中 {current_batch}/{total_batches} 批")
+            if progress_callback and total_batches > 0:
+                progress = 0.6 + (current_batch / total_batches) * 0.35
+                progress_callback(progress, f"翻译中 {current_batch}/{total_batches} 批")
 
-    dt = time.time() - t0
-    log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d 行）"
-        % (len(texts), target, n_batch, dt, len(texts) - len(todo), cache_hits))
+        dt = time.time() - t0
+        log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d 行）"
+            % (len(texts), target, n_batch, dt, len(texts) - len(todo), cache_hits))
 
-    if progress_callback:
-        progress_callback(0.95, "翻译完成")
+        if progress_callback:
+            progress_callback(0.95, "翻译完成")
 
-    return out
+        return out
+    finally:
+        if cache_obj is not None and cache_loop is not None:
+            try:
+                cache_loop.run_until_complete(cache_obj.close())
+            except Exception:
+                pass
+        if cache_loop is not None:
+            cache_loop.close()
+
 
 
 # --------------------------------------------------------------------------- #

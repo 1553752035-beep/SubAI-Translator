@@ -132,6 +132,9 @@ class TaskQueue:
         
         # 运行中的任务
         self._running_tasks: dict[str, asyncio.Task] = {}
+
+        # 提交序号：作为优先级队列的次键，保证全序（见 submit）
+        self._seq = 0
         
         # 队列状态
         self._is_shutting_down = False
@@ -197,9 +200,11 @@ class TaskQueue:
         # 创建队列任务
         queue_task = QueueTask(task_id, callback, priority, **kwargs)
         
-        # 加入优先级队列（优先级高的先处理）
-        # PriorityQueue按元组第一个元素排序，所以用(优先级, 时间戳, 任务)
-        await self._queue.put((queue_task.priority, queue_task.enqueued_at, queue_task))
+        # 加入优先级队列：元组按 (优先级, 提交序号) 排序，序号单调递增保证全序。
+        # 不能用 enqueued_at 做次键——同一时钟刻度内连续提交时两个任务时间戳可能相同，
+        # 此时 PriorityQueue 会继续比较 QueueTask 本身，因缺少 __lt__ 抛 TypeError。
+        self._seq += 1
+        await self._queue.put((queue_task.priority, self._seq, queue_task))
         
         logger.info(f"任务 {task_id} 已加入队列（优先级={priority}，队列长度={self._queue.qsize()}）")
         return True
@@ -230,7 +235,7 @@ class TaskQueue:
 
                 # 2. 有槽位后再从优先级队列取任务（保证高优先级先出）
                 try:
-                    priority, timestamp, queue_task = await asyncio.wait_for(
+                    _priority, _seq, queue_task = await asyncio.wait_for(
                         self._queue.get(),
                         timeout=1.0,
                     )

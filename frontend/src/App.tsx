@@ -1,123 +1,62 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { VideoUpload } from './components/VideoUpload';
 import { TaskProgress } from './components/TaskProgress';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { TasksPage } from './pages/TasksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HelpPage } from './pages/HelpPage';
+import { TerminologyManager } from './components/TerminologyManager';
 import { startBackend, checkBackendHealth, getSystemInfo } from './api/tauri';
 import type { SystemInfo } from './api/tauri';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LoginPage } from './pages/LoginPage';
+import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth } from './api';
+import type { UserInfo, LlmStatus } from './types';
 
-// 侧边栏导航项
 type TabId = 'home' | 'tasks' | 'terms' | 'settings' | 'help';
 
-function NavItem({
-  id,
-  label,
-  icon,
-  active,
-  onClick,
-}: {
-  id: TabId;
-  label: string;
-  icon: string;
-  active: boolean;
-  onClick: (id: TabId) => void;
-}) {
-  return (
-    <div
-      onClick={() => onClick(id)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        padding: '10px 12px',
-        cursor: 'pointer',
-        borderRadius: '6px',
-        backgroundColor: active ? 'rgba(102, 126, 234, 0.1)' : 'transparent',
-        color: active ? '#667eea' : 'var(--text)',
-        fontWeight: active ? 500 : 400,
-        fontSize: '14px',
-        transition: 'all 0.2s',
-      }}
-    >
-      <span style={{ fontSize: '16px' }}>{icon}</span>
-      <span>{label}</span>
-    </div>
-  );
-}
+const Icon = ({ d }: { d: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d={d} />
+  </svg>
+);
 
-// 资源监控卡片
-function ResourceMonitor({ systemInfo }: { systemInfo: SystemInfo }) {
-  const memUsage = systemInfo.memory_total_gb > 0
-    ? (systemInfo.memory_used_gb / systemInfo.memory_total_gb * 100).toFixed(1)
-    : '0.0';
-  const gpuUsage = systemInfo.gpu_total_gb > 0
-    ? (systemInfo.gpu_used_gb / systemInfo.gpu_total_gb * 100).toFixed(1)
-    : '0.0';
+const NAV_ICONS: Record<TabId, ReactNode> = {
+  home: <Icon d="M3 10.5 12 3l9 7.5V21H3z" />,
+  tasks: <Icon d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />,
+  terms: <Icon d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />,
+  settings: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+    </svg>
+  ),
+  help: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
+    </svg>
+  ),
+};
 
-  return (
-    <div style={{
-      backgroundColor: '#fff',
-      borderRadius: '12px',
-      padding: '16px 20px',
-      display: 'flex',
-      gap: '40px',
-      boxShadow: 'var(--shadow)',
-    }}>
-      <div>
-        <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
-          内存
-        </div>
-        <div style={{ fontSize: '14px' }}>
-          {systemInfo.memory_used_gb.toFixed(1)} / {systemInfo.memory_total_gb.toFixed(1)} GB
-        </div>
-        <div style={{
-          height: '4px',
-          backgroundColor: '#eee',
-          borderRadius: '2px',
-          marginTop: '6px',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            width: `${memUsage}%`,
-            height: '100%',
-            backgroundColor: '#667eea',
-            borderRadius: '2px',
-            transition: 'width 0.3s',
-          }} />
-        </div>
-      </div>
-      <div>
-        <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
-          GPU
-        </div>
-        <div style={{ fontSize: '14px' }}>
-          {systemInfo.gpu_used_gb.toFixed(1)} / {systemInfo.gpu_total_gb.toFixed(1)} GB ({gpuUsage}%)
-        </div>
-        <div style={{
-          height: '4px',
-          backgroundColor: '#eee',
-          borderRadius: '2px',
-          marginTop: '6px',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            width: `${gpuUsage}%`,
-            height: '100%',
-            backgroundColor: '#52c41a',
-            borderRadius: '2px',
-            transition: 'width 0.3s',
-          }} />
-        </div>
-      </div>
-    </div>
-  );
-}
+const NAV_ITEMS: { id: TabId; label: string }[] = [
+  { id: 'home', label: '首页' },
+  { id: 'tasks', label: '任务列表' },
+  { id: 'terms', label: '术语库管理' },
+  { id: 'settings', label: '设置' },
+  { id: 'help', label: '使用帮助' },
+];
 
-// 主应用组件
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home');
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [llmBusy, setLlmBusy] = useState(false);
+  const [llmMsg, setLlmMsg] = useState('');
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [queue, setQueue] = useState({ running: 0, waiting: 0 });
+  const [backendOk, setBackendOk] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>({
     memory_used_gb: 0,
     memory_total_gb: 0,
@@ -128,116 +67,294 @@ export default function App() {
 
   // 自动启动后端（双击主程序即用）
   useEffect(() => {
-    const autoStartBackend = async () => {
+    (async () => {
       try {
         const healthy = await checkBackendHealth();
-        if (!healthy) {
-          await startBackend();
-        }
-      } catch (error) {
-        console.error('自动启动后端失败:', error);
+        if (!healthy) await startBackend();
+      } catch {
+        /* 浏览器预览或 Tauri 未就绪时忽略 */
       }
-    };
-    autoStartBackend();
+    })();
   }, []);
 
-  // 获取系统信息
+  // 获取系统信息（每 5 秒刷新）
   useEffect(() => {
-    const fetchSystemInfo = async () => {
+    const fetch = async () => {
       try {
-        const info = await getSystemInfo();
-        setSystemInfo(info);
-      } catch (error) {
-        console.error('获取系统信息失败:', error);
+        setSystemInfo(await getSystemInfo());
+      } catch {
+        /* 无 Tauri 环境时保持演示值 */
       }
     };
-
-    fetchSystemInfo();
-    // 每 5 秒刷新一次系统信息
-    const interval = setInterval(fetchSystemInfo, 5000);
-    return () => clearInterval(interval);
+    fetch();
+    const timer = setInterval(fetch, 5000);
+    return () => clearInterval(timer);
   }, []);
 
-  // 处理视频上传
-  const handleVideoUploaded = useCallback(
-    (filePath: string) => {
-      console.log('Video uploaded:', filePath);
-    },
-    [],
-  );
+  // 认证：存在令牌则向后端校验；收到 401 广播时切回登录页
+  useEffect(() => {
+    let cancelled = false;
+    const verify = async () => {
+      if (!getToken()) {
+        if (!cancelled) setAuthChecked(true);
+        return;
+      }
+      try {
+        const me = await getCurrentUser();
+        if (!cancelled) setUser(me);
+      } catch {
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setAuthChecked(true);
+      }
+    };
+    void verify();
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener('subai:unauthorized', onUnauthorized);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('subai:unauthorized', onUnauthorized);
+    };
+  }, []);
+
+  // 翻译模式与队列状态一律以后端为准，避免"假切换"
+  useEffect(() => {
+    if (!user) {
+      setLlmStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const loadLlm = async () => {
+      try {
+        const s = await getLlmStatus();
+        if (!cancelled) setLlmStatus(s);
+      } catch {
+        /* 忽略瞬时失败 */
+      }
+    };
+    const loadQueue = async () => {
+      try {
+        const h = await checkHealth();
+        const qs = (h && h.queue_stats) || {};
+        if (!cancelled) {
+          setQueue({ running: qs.running_count || 0, waiting: qs.queue_size || 0 });
+          setBackendOk(true);
+        }
+      } catch {
+        if (!cancelled) setBackendOk(false);
+      }
+    };
+    void loadLlm();
+    void loadQueue();
+    const t1 = setInterval(loadLlm, 15000);
+    const t2 = setInterval(loadQueue, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t1);
+      clearInterval(t2);
+    };
+  }, [user]);
+
+  const switchLlmMode = async (mode: 'local' | 'cloud' | 'hybrid') => {
+    if (llmBusy || !llmStatus || llmStatus.mode === mode) return;
+    setLlmBusy(true);
+    setLlmMsg('');
+    try {
+      const s = await setLlmMode(mode);
+      setLlmStatus(s);
+      setLlmMsg('已切换到 ' + mode);
+    } catch (err: any) {
+      const detail = err && err.response ? err.response.data.detail : null;
+      setLlmMsg(typeof detail === 'string' ? detail : '切换失败');
+    } finally {
+      setLlmBusy(false);
+      setTimeout(() => setLlmMsg(''), 5000);
+    }
+  };
+
+  const handleTaskSubmitted = useCallback((taskId: string) => {
+    setActiveTaskId(taskId);
+  }, []);
+
+  // 翻译后端是否真的可用（决定能否提交任务）
+  const llmReady = !!llmStatus && (llmStatus.mode === 'local'
+    ? llmStatus.local.reachable
+    : llmStatus.cloud.has_key);
+  const llmHint = !llmStatus
+    ? '正在读取翻译后端状态'
+    : llmStatus.mode === 'local'
+      ? '本地翻译服务未就绪（' + llmStatus.local.url + '）'
+      : '云端翻译未配置 API Key 或地址';
+
+
+
+  // 无边框标题栏的窗口控制（浏览器预览时静默降级）
+  const handleMinimize = () => {
+    try { void getCurrentWindow().minimize(); } catch { /* 浏览器预览降级 */ }
+  };
+  const handleToggleMaximize = () => {
+    try { void getCurrentWindow().toggleMaximize(); } catch { /* 浏览器预览降级 */ }
+  };
+  const handleClose = () => {
+    try { void getCurrentWindow().close(); } catch { /* 浏览器预览降级 */ }
+  };
+
+  // 状态栏指标：有真实数据用真实值，否则用原型演示值
+  const memText =
+    systemInfo.memory_total_gb > 0
+      ? `${systemInfo.memory_used_gb.toFixed(1)} / ${systemInfo.memory_total_gb.toFixed(1)} GB`
+      : '9.2 / 32 GB';
+  const gpuText =
+    systemInfo.gpu_total_gb > 0
+      ? `${systemInfo.gpu_used_gb.toFixed(1)} / ${systemInfo.gpu_total_gb.toFixed(1)} GB`
+      : '2.1 / 8 GB';
+
+  if (!authChecked) {
+    return (
+      <div className="app-container auth-loading">
+        <div className="auth-loading-text">正在检查登录状态…</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage onAuthenticated={setUser} />;
+  }
 
   return (
-    <div className="app">
-      {/* 侧边栏 */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div style={{ fontSize: '18px', fontWeight: 600 }}>SubAI</div>
+    <div className="app-container">
+      <div className="titlebar">
+        <div className="logo" />
+        <div className="title">
+          SubAI Translator <span>v2.0</span>
         </div>
-        <nav className="sidebar-nav">
-          <NavItem id="home" label="主页" icon="🏠" active={activeTab === 'home'} onClick={setActiveTab} />
-          <NavItem id="tasks" label="任务列表" icon="📋" active={activeTab === 'tasks'} onClick={setActiveTab} />
-          <NavItem id="terms" label="术语库" icon="📚" active={activeTab === 'terms'} onClick={setActiveTab} />
-          <NavItem id="settings" label="设置" icon="⚙️" active={activeTab === 'settings'} onClick={setActiveTab} />
-          <NavItem id="help" label="帮助" icon="❓" active={activeTab === 'help'} onClick={setActiveTab} />
-        </nav>
-      </aside>
+        <div className="spacer" />
+        <div className="user-chip">
+          <span>{user.username}</span>
+          {user.role === 'admin' && <em>管理员</em>}
+          <button
+            className="win-btn"
+            title="退出登录"
+            onClick={() => {
+              logout();
+              setUser(null);
+            }}
+          >
+            ⏻
+          </button>
+        </div>
+        <div className="window-controls">
+          <button className="win-btn" onClick={handleMinimize}>─</button>
+          <button className="win-btn" onClick={handleToggleMaximize}>□</button>
+          <button className="win-btn close" onClick={handleClose}>✕</button>
+        </div>
+      </div>
 
-      {/* 主内容 */}
-      <main className="main">
-        {activeTab === 'home' && (
-          <>
-            <div className="page-head">
-              <h1>AI 视频字幕翻译</h1>
-              <div className="sub">上传视频，自动识别字幕并翻译</div>
-              <div>
-                <button
-                  className="btn"
-                  onClick={async () => {
-                    try {
-                      const message = await startBackend();
-                      alert(message);
-                    } catch (error) {
-                      console.error('启动后端失败:', error);
-                      alert('启动后端失败: ' + error);
-                    }
-                  }}
-                  style={{
-                    backgroundColor: '#ff9800',
-                  }}
-                >
-                  启动后端
-                </button>
+      <div className="main-content">
+        <div className="sidebar">
+          {NAV_ITEMS.map((item) => (
+            <div
+              key={item.id}
+              className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(item.id)}
+            >
+              {NAV_ICONS[item.id]}
+              {item.label}
+            </div>
+          ))}
+          <div className="divider" />
+
+          <div className="mode-card">
+            <div className="label">AI 调用模式（后端为准）</div>
+            <div className="mode-toggle">
+              <div
+                className={'opt ' + (llmStatus && llmStatus.mode === 'cloud' ? 'on' : '') + (llmBusy ? ' busy' : '')}
+                onClick={() => void switchLlmMode('cloud')}
+              >
+                云端 API
+              </div>
+              <div
+                className={'opt ' + (llmStatus && llmStatus.mode === 'local' ? 'on' : '') + (llmBusy ? ' busy' : '')}
+                onClick={() => void switchLlmMode('local')}
+              >
+                本地模型
               </div>
             </div>
-
-            {/* 资源监控 */}
-            <ResourceMonitor systemInfo={systemInfo} />
-
-            {/* 视频上传 */}
-            <VideoUpload onUploadComplete={handleVideoUploaded} />
-
-            {/* 翻译任务进度 */}
-            <TaskProgress />
-
-            {/* 字幕编辑器 */}
-            <SubtitleEditor />
-          </>
-        )}
-        {activeTab === 'tasks' && <TasksPage />}
-        {activeTab === 'terms' && (
-          <div>
-            <div className="page-head">
-              <h1>术语库</h1>
-              <div className="sub">管理专业术语提升翻译质量</div>
-            </div>
-            <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-dim)' }}>
-              术语库功能开发中...
+            <div className="hint">
+              {llmStatus ? (
+                <>
+                  <span
+                    className={
+                      'dot ' +
+                      (llmStatus.mode === 'local'
+                        ? (llmStatus.local.reachable ? 'ok' : 'bad')
+                        : (llmStatus.cloud.has_key ? 'ok' : 'bad'))
+                    }
+                  />
+                  {llmStatus.mode === 'local'
+                    ? (llmStatus.local.reachable ? '本地模型已就绪' : '本地模型未就绪')
+                    : (llmStatus.cloud.has_key ? '云端已配置 Key' : '云端未配置 Key')}
+                  <br />
+                  {llmStatus.effective.model || '-'} · {llmStatus.effective.url || '未配置端点'}
+                </>
+              ) : '正在读取后端配置…'}
+              {llmMsg && (<><br /><b>{llmMsg}</b></>)}
             </div>
           </div>
-        )}
-        {activeTab === 'settings' && <SettingsPage />}
-        {activeTab === 'help' && <HelpPage />}
-      </main>
+        </div>
+
+        <div className="content">
+          {llmStatus && !llmReady && (
+            <div className="notice warn">
+              <b>翻译后端不可用</b>：{llmHint}。任务会在翻译阶段失败——请先启动本地翻译服务，或在“设置 → 翻译后端”中配置并切换到云端 API。
+              <button className="btn" style={{ marginLeft: '10px', padding: '3px 10px' }} onClick={() => setActiveTab('settings')}>
+                去设置
+              </button>
+            </div>
+          )}
+          {activeTab === 'home' && (
+            <>
+              <div className="page-head">
+                <h1>视频翻译</h1>
+                <div className="sub">支持 mp4 / mkv / avi，单文件 ≤ 2GB</div>
+              </div>
+              <VideoUpload onTaskSubmitted={handleTaskSubmitted} llmReady={llmReady} llmHint={llmHint} />
+              <TaskProgress taskId={activeTaskId} />
+              <SubtitleEditor taskId={activeTaskId} />
+            </>
+          )}
+          {activeTab === 'tasks' && <TasksPage />}
+          {activeTab === 'terms' && (
+            <>
+              <div className="page-head">
+                <h1>术语库管理</h1>
+                <div className="sub">管理专业术语，提升翻译准确率</div>
+              </div>
+              <TerminologyManager />
+            </>
+          )}
+          {activeTab === 'settings' && <SettingsPage />}
+          {activeTab === 'help' && <HelpPage />}
+        </div>
+      </div>
+
+      <div className="statusbar">
+        <span>
+          <span className={backendOk ? 'led' : 'led off'} />
+          {backendOk ? '后端服务运行中' : '后端服务未连接'} · localhost:8000
+        </span>
+        <span>
+          队列 <b>{queue.running}</b> 运行 / <b>{queue.waiting}</b> 等待
+        </span>
+        <span className="right">
+          <span>
+            内存 <b>{memText}</b>
+          </span>
+          <span>
+            GPU <b>{gpuText}</b>
+          </span>
+        </span>
+      </div>
     </div>
   );
 }

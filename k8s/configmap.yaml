@@ -1,0 +1,26 @@
+# SubAI Translator —— 非敏感配置（ConfigMap）
+# 敏感信息（JWT 密钥 / 管理员密码 / API 密钥）请勿放这里，见 secret.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: subai-backend-config
+  namespace: subai
+data:
+  SUBAI_SERVER_HOST: "0.0.0.0"
+  SUBAI_SERVER_PORT: "8000"
+  SUBAI_LOG_LEVEL: "INFO"
+
+  # 翻译服务
+  SUBAI_LLM_MODE: "local"
+  SUBAI_LLM_LOCAL_URL: "http://subai-llm.subai.svc.cluster.local:5001/v1/chat/completions"
+  SUBAI_LLM_LOCAL_MODEL: "koboldcpp"
+
+  # 并发与资源
+  SUBAI_CONCURRENCY_LOCAL_MAX_CONCURRENT: "2"
+  SUBAI_CONCURRENCY_CLOUD_MAX_CONCURRENT: "4"
+  SUBAI_CONCURRENCY_MAX_QUEUE_SIZE: "100"
+
+  # 备份
+  SUBAI_BACKUP_ENABLED: "true"
+  SUBAI_BACKUP_AUTO_BACKUP_INTERVAL_HOURS: "24"
+  SUBAI_BACKUP_MAX_BACKUPS: "10"

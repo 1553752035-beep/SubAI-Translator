@@ -39,6 +39,31 @@ class TestPipelineE2E:
         pytest.importorskip("faster_whisper")
         pytest.importorskip("rapidocr_onnxruntime")
         pytest.importorskip("cv2")
+
+    @pytest.fixture
+    def _require_asr_model(self):
+        """ASR 模型文件缺失时跳过（模型体积大，不随代码仓库分发）"""
+        from src.config import config as _cfg
+        asr_dir = os.path.join(_cfg.models_dir, "faster-whisper-small")
+        if not os.path.isdir(asr_dir):
+            pytest.skip("ASR 模型目录不存在：%s" % asr_dir)
+
+    @pytest.fixture
+    def _require_llm_service(self):
+        """LLM 翻译服务不可用时跳过（外部运行时依赖，非代码问题）"""
+        import socket
+        from urllib.parse import urlparse
+        from src.config import config as _cfg
+
+        url, _, _ = _cfg.get_llm_endpoint()
+        parsed = urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                pass
+        except OSError:
+            pytest.skip("LLM 翻译服务不可用：%s" % url)
     
     @pytest.fixture
     def test_video_asr(self):
@@ -55,7 +80,7 @@ class TestPipelineE2E:
         """输出目录"""
         return os.path.join(ROOT, "output")
     
-    def test_pipeline_asr_mode(self, test_video_asr, output_dir):
+    def test_pipeline_asr_mode(self, _require_asr_model, _require_llm_service, test_video_asr, output_dir):
         """测试语音字幕模式Pipeline"""
         if not os.path.isfile(test_video_asr):
             pytest.skip("测试视频不存在")
@@ -77,7 +102,7 @@ class TestPipelineE2E:
             assert os.path.exists(f)
             assert os.path.getsize(f) > 0
     
-    def test_pipeline_hardsub_mode(self, test_video_hardsub, output_dir):
+    def test_pipeline_hardsub_mode(self, _require_llm_service, test_video_hardsub, output_dir):
         """测试硬字幕OCR模式Pipeline"""
         if not os.path.isfile(test_video_hardsub):
             pytest.skip("测试视频不存在")
@@ -99,7 +124,7 @@ class TestPipelineE2E:
             assert os.path.exists(f)
             assert os.path.getsize(f) > 0
     
-    def test_pipeline_vtt_output(self, test_video_asr, output_dir):
+    def test_pipeline_vtt_output(self, _require_asr_model, _require_llm_service, test_video_asr, output_dir):
         """测试VTT格式输出"""
         if not os.path.isfile(test_video_asr):
             pytest.skip("测试视频不存在")
@@ -120,7 +145,7 @@ class TestPipelineE2E:
             content = f.read()
             assert content.startswith("WEBVTT")
     
-    def test_pipeline_ass_output(self, test_video_asr, output_dir):
+    def test_pipeline_ass_output(self, _require_asr_model, _require_llm_service, test_video_asr, output_dir):
         """测试ASS格式输出"""
         if not os.path.isfile(test_video_asr):
             pytest.skip("测试视频不存在")
@@ -142,7 +167,7 @@ class TestPipelineE2E:
             assert "[Script Info]" in content
             assert "[Events]" in content
     
-    def test_pipeline_json_output(self, test_video_asr, output_dir):
+    def test_pipeline_json_output(self, _require_asr_model, _require_llm_service, test_video_asr, output_dir):
         """测试JSON格式输出"""
         if not os.path.isfile(test_video_asr):
             pytest.skip("测试视频不存在")

@@ -1,8 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 
 /**
- * 检查后端服务健康状态
+ * 与 Tauri(Rust) 侧的通信层。
+ *
+ * 只保留 UI 现在真正用到的能力：进程管理、系统信息、帮助信息。
+ * 业务数据一律走带认证的 axios 层（src/api/index.ts），
+ * 避免出现"绕过后端鉴权、且与其他调用点重复"的包装。
  */
+
+/** 检查内置后端是否已就绪 */
 export async function checkBackendHealth(): Promise<boolean> {
   try {
     return await invoke('check_backend_health');
@@ -12,9 +18,7 @@ export async function checkBackendHealth(): Promise<boolean> {
   }
 }
 
-/**
- * 启动后端服务
- */
+/** 启动内置后端（sidecar），返回启动结果描述 */
 export async function startBackend(): Promise<string> {
   try {
     return await invoke('start_backend');
@@ -24,93 +28,7 @@ export async function startBackend(): Promise<string> {
   }
 }
 
-/**
- * 停止后端服务
- */
-export async function stopBackend(): Promise<string> {
-  try {
-    return await invoke('stop_backend');
-  } catch (error) {
-    console.error('Failed to stop backend:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取后端状态
- */
-export async function getBackendStatus(): Promise<BackendStatus> {
-  try {
-    return await invoke('get_backend_status');
-  } catch (error) {
-    console.error('Failed to get backend status:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取任务列表
- */
-export async function getTaskList(): Promise<TaskInfo[]> {
-  try {
-    return await invoke('get_task_list');
-  } catch (error) {
-    console.error('Failed to get task list:', error);
-    return [];
-  }
-}
-
-/**
- * 上传视频文件
- */
-export async function uploadVideo(filePath: string): Promise<string> {
-  try {
-    return await invoke('upload_video', { filePath });
-  } catch (error) {
-    console.error('Failed to upload video:', error);
-    throw error;
-  }
-}
-
-/**
- * 开始翻译任务
- */
-export async function startTranslation(taskId: string): Promise<string> {
-  try {
-    return await invoke('start_translation', { taskId });
-  } catch (error) {
-    console.error('Failed to start translation:', error);
-    throw error;
-  }
-}
-
-/**
- * 取消翻译任务
- */
-export async function cancelTranslation(taskId: string): Promise<string> {
-  try {
-    return await invoke('cancel_translation', { taskId });
-  } catch (error) {
-    console.error('Failed to cancel translation:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取任务状态
- */
-export async function getTaskStatus(taskId: string): Promise<string> {
-  try {
-    return await invoke('get_task_status', { taskId });
-  } catch (error) {
-    console.error('Failed to get task status:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取系统信息（内存、GPU）
- */
+/** 读取系统内存 / GPU 占用（无 Tauri 环境时会失败，由调用方兜底） */
 export async function getSystemInfo(): Promise<SystemInfo> {
   try {
     return await invoke('get_system_info');
@@ -120,61 +38,7 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   }
 }
 
-/**
- * 获取应用配置
- */
-export async function getAppConfig(): Promise<Record<string, any>> {
-  try {
-    return await invoke('get_app_config');
-  } catch (error) {
-    console.error('Failed to get app config:', error);
-    throw error;
-  }
-}
-
-/**
- * 更新应用配置
- */
-export async function updateAppConfig(config: Record<string, any>): Promise<string> {
-  try {
-    return await invoke('update_app_config', { config });
-  } catch (error) {
-    console.error('Failed to update app config:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取术语列表
- */
-export async function getTerminologyList(): Promise<string> {
-  try {
-    return await invoke('get_terminology_list');
-  } catch (error) {
-    console.error('Failed to get terminology list:', error);
-    throw error;
-  }
-}
-
-/**
- * 添加术语
- */
-export async function addTerminology(sourceText: string, translation: string, priority: string): Promise<string> {
-  try {
-    return await invoke('add_terminology', { 
-      sourceText, 
-      translation, 
-      priority 
-    });
-  } catch (error) {
-    console.error('Failed to add terminology:', error);
-    throw error;
-  }
-}
-
-/**
- * 获取帮助信息
- */
+/** 读取帮助信息（静态） */
 export async function getHelpInfo(): Promise<HelpInfo> {
   try {
     return await invoke('get_help_info');
@@ -184,7 +48,6 @@ export async function getHelpInfo(): Promise<HelpInfo> {
   }
 }
 
-// 类型定义
 export interface StageInfo {
   name: string;
   status: 'done' | 'active' | 'wait';
@@ -197,12 +60,6 @@ export interface TaskInfo {
   status: string;
   progress: number;
   stages: StageInfo[];
-}
-
-export interface BackendStatus {
-  running: boolean;
-  pid: number | null;
-  url: string;
 }
 
 export interface SystemInfo {

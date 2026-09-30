@@ -93,3 +93,10 @@ D:\SubAI-Translator
 - **提示 GPU 不可用**：未安装 `torch` 或显存不足 4GB 时会自动回退到 CPU，属正常现象
 - **云端翻译返回 401**：检查 `SUBAI_LLM_CLOUD_API_KEY` 是否已正确配置
 - **端口被占用**：修改 `SUBAI_SERVER_PORT` 环境变量后重启后端
+
+## 许可证
+
+本项目采用 **MIT** 许可证，详见 [LICENSE](LICENSE)。
+
+> 说明：对外分发**完整运行包**时，其中的第三方组件（FFmpeg、ASR 模型、Python 运行时等）各自适用其原始许可证，请一并附上相应声明。
+> 本仓库通过 `.gitignore` 排除了 `bin/`（FFmpeg 二进制）与 `models/`（ASR 模型），因此仓库本身不重分发这些组件。

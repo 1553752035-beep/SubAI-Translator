@@ -53,7 +53,8 @@ class CacheRecord:
         translation: str,
         created_at: float,
         accessed_at: float,
-        access_count: int = 1
+        access_count: int = 1,
+        ttl_days: int = 30
     ):
         self.text = text
         self.target_lang = target_lang
@@ -61,12 +62,12 @@ class CacheRecord:
         self.created_at = created_at
         self.accessed_at = accessed_at
         self.access_count = access_count
+        self.ttl_days = ttl_days
     
     @property
     def is_expired(self) -> bool:
-        """检查是否过期"""
-        ttl_seconds = 30 * 24 * 3600  # 30天
-        return (time.time() - self.created_at) > ttl_seconds
+        """检查是否过期（TTL 取自缓存配置，而非固定 30 天）"""
+        return (time.time() - self.created_at) > self.ttl_days * 24 * 3600
     
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -192,7 +193,8 @@ class TranslationCache:
             translation=row["translation"],
             created_at=row["created_at"],
             accessed_at=row["accessed_at"],
-            access_count=row["access_count"]
+            access_count=row["access_count"],
+            ttl_days=self.ttl_days
         )
         
         if record.is_expired:
@@ -429,7 +431,10 @@ async def get_translation_cache(db_path: Optional[str] = None) -> TranslationCac
     """
     global translation_cache
     if translation_cache is None:
-        db_path = db_path or DEFAULT_CACHE_DB
+        if db_path is None:
+            # 优先使用配置路径（便于测试/部署隔离），回退到默认值
+            from src.config import config
+            db_path = config.cache_db_path or DEFAULT_CACHE_DB
         translation_cache = TranslationCache(db_path)
         await translation_cache.initialize()
     return translation_cache

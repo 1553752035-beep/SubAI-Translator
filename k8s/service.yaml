@@ -1,0 +1,19 @@
+# SubAI Translator —— Service（ClusterIP）
+# 集群内通过 subai-backend.subai.svc.cluster.local:8000 访问；
+# 对外暴露请另配 Ingress（见 ingress.yaml）或改用 LoadBalancer/NodePort。
+apiVersion: v1
+kind: Service
+metadata:
+  name: subai-backend
+  namespace: subai
+  labels:
+    app: subai-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: subai-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

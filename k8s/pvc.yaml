@@ -1,0 +1,26 @@
+# SubAI Translator —— 持久卷声明（PVC）
+# 数据（SQLite / 上传 / 备份）与输出字幕需要持久化，模型单独挂载只读。
+# 集群未配置动态 Provisioner 时，请先部署 storageclass 或改用 hostPath。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: subai-data-pvc
+  namespace: subai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: subai-models-pvc
+  namespace: subai
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 20Gi

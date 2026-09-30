@@ -157,6 +157,52 @@ class TestTerminologyManager:
 
 
 # --------------------------------------------------------------------------- #
+# 数据隔离测试（三期）
+# --------------------------------------------------------------------------- #
+class TestTerminologyIsolation:
+    """多用户术语隔离与优先级测试"""
+
+    @pytest.fixture
+    def tm(self, tmp_path):
+        return TerminologyManager(str(tmp_path / "iso_terminology.db"))
+
+    def test_user_term_priority_over_system(self, tm):
+        """用户术语优先于系统术语"""
+        tm.add_term("术语", "系统翻译", user_id=None)
+        tm.add_term("术语", "用户翻译", user_id="user1")
+
+        # 用户匹配到自己的术语
+        assert tm.match("术语", user_id="user1") == "用户翻译"
+        # 其他用户匹配到系统术语
+        assert tm.match("术语", user_id="user2") == "系统翻译"
+
+    def test_list_terms_include_system(self, tm):
+        """list_terms 支持系统术语 + 用户术语联合查询"""
+        tm.add_term("系统", "sys", user_id=None)
+        tm.add_term("用户", "usr", user_id="user1")
+
+        # 仅用户自己的术语
+        own = tm.list_terms(user_id="user1")
+        assert len(own) == 1
+        assert own[0]["source"] == "用户"
+
+        # 系统术语 + 用户术语
+        both = tm.list_terms(user_id="user1", include_system=True)
+        assert len(both) == 2
+        assert {t["source"] for t in both} == {"系统", "用户"}
+
+    def test_delete_only_own_term(self, tm):
+        """用户只能删除自己的术语，不影响系统术语"""
+        tm.add_term("术语", "系统翻译", user_id=None)
+        tm.add_term("术语", "用户翻译", user_id="user1")
+
+        # 删除 user1 的术语
+        assert tm.delete_term("术语", user_id="user1") is True
+        # 系统术语仍存在
+        assert tm.match("术语", user_id="user1") == "系统翻译"
+
+
+# --------------------------------------------------------------------------- #
 # Pipeline核心函数测试
 # --------------------------------------------------------------------------- #
 class TestPipelineFunctions:
