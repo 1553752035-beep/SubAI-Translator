@@ -73,6 +73,20 @@ subai-backend.exe --check --full
 自检逐项检查：运行环境与依赖、FFmpeg（含 libx264）、ASR 模型、目录可写性、翻译后端连通性、GPU/CPU 判定、端口占用。
 **每个失败项都会给出可执行的修复建议**，退出码 `0`/`1` 便于脚本判断，`--json` 可机器读取。
 
+### 组装绿色版（可分发给他人）
+
+```powershell
+cd 源码
+python -m PyInstaller --noconfirm subai_backend.spec
+cd frontend; npm run tauri:build -- --no-bundle; cd ..
+powershell -ExecutionPolicy Bypass -File tools\build_green_package.ps1 -OutDir D:\SubAI-Green
+```
+
+产物结构（约 0.75 GB）：`SubAI-Translator.exe` + `subai-backend.exe` + `bin/`（FFmpeg）+ `models/`（ASR 模型）+ `data/` + `使用说明.txt` + `LICENSE`。
+目录内所有路径都由 exe 位置推导，可**整体拷贝到其他机器**。
+
+已在全新目录实测：自检通过（模型项在新路径下 PASS）、真实任务与压制/配音正常落盘于新目录、桌面端能拉起同目录的后端，且两个 exe 中**不含任何开发机绝对路径**。
+
 ### 需要自备的资源
 
 | 资源 | 放置位置 | 说明 |

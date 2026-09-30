@@ -215,16 +215,9 @@ fn resolve_project_root() -> Option<std::path::PathBuf> {
         }
     }
 
-    // 4) 项目标准路径兜底
-    let candidates = [
-        PathBuf::from(r"D:\SubAI-Translator"),
-        PathBuf::from(r"C:\SubAI-Translator"),
-    ];
-    for c in candidates {
-        if c.join("src/api/server.py").exists() {
-            return Some(c);
-        }
-    }
+    // 这里刻意**不写死任何绝对路径**：写死会把开发机的路径编进发布产物。
+    // 上面的 SUBAI_ROOT / 从 exe 逐级向上查找 / 当前工作目录 三种策略，
+    // 已覆盖源码方式运行的全部常见情形。
     None
 }
 
