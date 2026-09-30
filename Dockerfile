@@ -21,17 +21,26 @@ ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # ---------------------------------------------------------------------------
-# 系统依赖：FFmpeg（视频抽帧 / 字幕烧录 / 转封装）
+# 系统依赖
+#   ffmpeg           视频抽帧 / 字幕烧录 / 转封装
+#   libgl1           以下两项是 opencv-python（硬字幕识别）在无头环境的运行时依赖。
+#   libglib2.0-0     启动期并不会 import cv2（延迟到硬字幕任务执行时），
+#                    因此缺库时镜像仍能启动，但硬字幕任务会失败。
 # ---------------------------------------------------------------------------
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libgl1 \
+        libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # 创建非 root 用户，降低容器逃逸风险
+# 固定 UID/GID=1000：宿主机挂载目录只需 chown 1000:1000 即可被容器内用户写入。
+# （用 --system 会自动分配低位 UID，属主对不上会导致挂载卷写入失败。）
 # ---------------------------------------------------------------------------
-RUN groupadd --system subai && \
-    useradd --system --gid subai --create-home subai
+RUN groupadd --gid 1000 subai && \
+    useradd --uid 1000 --gid 1000 --create-home subai
 
 WORKDIR /app
 

@@ -70,3 +70,40 @@ jobs:
 
       - name: 运行测试
         run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 容器化路径（V-1）：镜像能否构建、容器能否起来并通过健康检查。
+  # 本机无法安装 Docker，因此这条链路由 CI 代验。
+  # 设为非阻塞：容器路径此前从未真实验证过，首跑失败是有信息量的结果，
+  # 不应在拿到日志前就拦住提交。
+  # ---------------------------------------------------------------------------
+  container:
+    name: 容器镜像构建与启动（Linux，参考）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker build -t subai-backend:ci .
+
+      - name: 启动容器
+        run: docker run -d --name subai-ci -p 8000:8000 -e SUBAI_AUTH_JWT_SECRET=ci-test-secret subai-backend:ci
+
+      - name: 等待健康检查
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health > /tmp/health.json; then
+              echo "健康检查通过（第 $i 次尝试）："
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "健康检查失败，容器日志如下："
+          docker logs subai-ci
+          exit 1
+
+      - name: 清理容器
+        if: always()
+        run: docker rm -f subai-ci || true

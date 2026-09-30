@@ -9,6 +9,11 @@
 #
 # 本地 LLM（koboldcpp）默认通过 host.docker.internal 访问宿主机 5001 端口；
 # 如 LLM 运行在远程/其他容器，请修改 SUBAI_LLM_LOCAL_URL 或 SUBAI_LLM_MODE=cloud。
+#
+# 首次启动前（Linux）：容器内以 UID 1000 的非 root 用户运行，
+# 若宿主机挂载目录属主不匹配，SQLite / 输出写入会失败，请先执行：
+#   mkdir -p data output && sudo chown -R 1000:1000 data output
+# （models 目录只需可读，已按只读方式挂载。）
 # =============================================================================
 
 services:
@@ -45,8 +50,8 @@ services:
     volumes:
       # SQLite 数据库 / 上传文件持久化
       - ./data:/app/data
-      # ASR 模型（faster-whisper-small），启动前请放置于宿主机 ./models
-      - ./models:/app/models
+      # ASR 模型（faster-whisper-small），启动前请放置于宿主机 ./models；只需可读
+      - ./models:/app/models:ro
       # 字幕输出持久化
       - ./output:/app/output
 
