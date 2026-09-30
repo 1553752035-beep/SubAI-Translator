@@ -43,6 +43,7 @@ output-backup/
 logs/
 data/*.wav
 data/*.png
+data/uploads/
 *.db
 build_log.txt
 

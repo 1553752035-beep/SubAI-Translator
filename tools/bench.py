@@ -8,7 +8,7 @@ SubAI Translator 环境能力基准
 并顺手把 GPU 的可达性用**实测**给出定论（而不是靠推断）。
 
 用法：
-    D:\\SubAI-Translator\\.venv\\Scripts\\python.exe D:\\SubAI-Translator\\tools\\bench.py
+    python tools/bench.py            # 在源码目录下，用当前环境的 Python
 
 每节独立 try/except，任何一节失败都不影响其余节。
 """
