@@ -323,7 +323,12 @@ def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[ass
     }
 
     def _do_post():
-        return httpx.post(url, json=payload, headers=headers, timeout=timeout)  # noqa: E731
+        # raise_for_status 必须放在**重试内部**：
+        # httpx.post 对 5xx 不会抛异常,若在重试之外 raise,retry() 根本看不到服务端错误,
+        # "5xx 可重试"就形同虚设;4xx 则由 non_retryable_http_status 立即失败。
+        resp = httpx.post(url, json=payload, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        return resp
 
     try:
         r = retry(
@@ -332,7 +337,6 @@ def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[ass
             base_delay=_cfg.llm.retry_delay,
             retry_on=(httpx.HTTPError, ConnectionError, TimeoutError),
         )
-        r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
     except RetryExhausted as e:
         raise RuntimeError(f"翻译请求失败（重试 {_cfg.llm.max_retries} 次后仍失败）: {e.last_exception}")
