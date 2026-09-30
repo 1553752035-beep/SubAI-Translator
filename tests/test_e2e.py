@@ -12,10 +12,12 @@ SubAI Translator —— 端到端测试套件
 运行方式:
     pytest tests/test_e2e.py -v
 """
+import http.server
 import json
 import os
 import sys
 import tempfile
+import threading
 import pytest
 
 # 添加项目根目录到路径
@@ -25,6 +27,49 @@ if ROOT not in sys.path:
 
 from src.pipeline import fmt_ts, _norm, _regroup, run_pipeline
 from src.db.terminology import TerminologyManager
+
+
+class _MockLLM:
+    """极简 OpenAI 兼容服务（批量回编号译文，单行回 'T:原文'）。
+
+    用于在真实翻译服务不可用时，仍然让端到端用例跑起来。
+    """
+
+    def __init__(self):
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                n = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                prompt = body.get("messages", [{}])[-1].get("content", "")
+                if "Translate each numbered" in prompt:
+                    out = []
+                    for line in prompt.splitlines():
+                        s = line.strip()
+                        if s and s[0].isdigit() and ". " in s:
+                            k, _, text = s.partition(". ")
+                            out.append(k + ". T:" + text)
+                    content = "\n".join(out)
+                else:
+                    content = "T:" + prompt
+                data = json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d/v1/chat/completions" % self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
 
 
 # --------------------------------------------------------------------------- #
@@ -68,8 +113,12 @@ class TestPipelineE2E:
                 break
 
     @pytest.fixture
-    def _require_llm_service(self):
-        """LLM 翻译服务不可用时跳过（外部运行时依赖，非代码问题）"""
+    def _require_llm_service(self, monkeypatch):
+        """提供翻译服务：真实服务可用时用它，否则**降级到本地 mock**。
+
+        早期实现是"服务不可用就 skip"，导致 CI 里 asr/hardsub/VTT/ASS/JSON
+        这些多格式端到端覆盖永久缺失。现改为降级到 mock，保证用例始终执行。
+        """
         import socket
         from urllib.parse import urlparse
         from src.config import config as _cfg
@@ -81,8 +130,18 @@ class TestPipelineE2E:
         try:
             with socket.create_connection((host, port), timeout=2):
                 pass
+            yield "real"
+            return
         except OSError:
-            pytest.skip("LLM 翻译服务不可用：%s" % url)
+            pass
+
+        mock = _MockLLM()
+        monkeypatch.setattr(_cfg.llm, "mode", "local")
+        monkeypatch.setattr(_cfg.llm, "local_url", mock.url)
+        try:
+            yield "mock"
+        finally:
+            mock.close()
     
     @pytest.fixture
     def test_video_asr(self):

@@ -38,6 +38,7 @@ if ROOT not in sys.path:
 
 from src.db.terminology import TerminologyManager
 from src.config import config as _cfg, ensure_cuda_dll_path
+from src.cancel import raise_if_cancelled
 from src.cache.translation_cache import TranslationCache
 from src.retry import retry, RetryExhausted
 
@@ -379,6 +380,7 @@ def translate(
     progress_callback: Optional[Callable] = None,
     use_cache: bool = True,
     stats: Optional[dict] = None,
+    should_cancel: Optional[Callable] = None,
 ) -> list[str]:
     """
     逐批复用一次请求翻译多行（编号协议），解析失败自动退回逐行翻译。
@@ -487,6 +489,8 @@ def translate(
                 log("  [翻译] 第 %d 行失败：%r" % (i + 1, e))
 
         for s in range(0, len(todo_after_cache), batch_size):
+            # 协作式取消检查点：每个翻译批次前
+            raise_if_cancelled(should_cancel)
             idxs = todo_after_cache[s:s + batch_size]
             block = "\n".join(
                 "%d. %s" % (n + 1, protected[i][0]) for n, i in enumerate(idxs)
@@ -628,6 +632,7 @@ def run_pipeline(
     sample_fps: Optional[float] = None,
     progress_callback: Optional[Callable] = None,
     stats: Optional[dict] = None,
+    should_cancel: Optional[Callable] = None,
 ) -> list[str]:
     """
     完整Pipeline（视频 -> 字幕 -> 翻译 -> 输出）
@@ -676,6 +681,9 @@ def run_pipeline(
     if progress_callback:
         progress_callback(0.05, "术语库加载完成")
     
+    # 协作式取消检查点：开始重活之前
+    raise_if_cancelled(should_cancel)
+
     # 第2步：字幕提取
     log("[2/4] 字幕提取 ...")
     if mode == "asr":
@@ -688,11 +696,18 @@ def run_pipeline(
         log("未提取到任何字幕，结束。")
         return []
     
+    # 协作式取消检查点：识别完成后
+    raise_if_cancelled(should_cancel)
+
     # 第3步：翻译
     log("[3/4] 翻译 ...")
     texts = [r["text"] for r in rows]
-    translated = translate(texts, target_lang, terms, progress_callback=progress_callback, stats=stats)
+    translated = translate(texts, target_lang, terms, progress_callback=progress_callback,
+                           stats=stats, should_cancel=should_cancel)
     
+    # 协作式取消检查点：写盘前（取消则不留半成品）
+    raise_if_cancelled(should_cancel)
+
     # 第4步：落盘
     log("[4/4] 写出字幕 ...")
     out_dir = OUT_DIR

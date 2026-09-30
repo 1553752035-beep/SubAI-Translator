@@ -45,6 +45,12 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from src.config import config, reload_config, persist_env
+from src.cancel import (
+    TaskCancelled,
+    cancel as cancel_task_token,
+    register as register_cancel_token,
+    unregister as unregister_cancel_token,
+)
 from src.db.tasks import TaskManager, TaskRecord, get_task_manager
 from src.db.terminology import AsyncTerminologyManager
 from src.cache.translation_cache import TranslationCache, get_translation_cache
@@ -508,6 +514,9 @@ async def process_transcode_task(
     
     # 设置全局task_id（供进度回调使用）
     progress_callback_task_id = task_id
+
+    # 注册协作式取消令牌：DELETE /api/task/{id} 置位后，流水线会在下一个检查点中止
+    cancel_token = register_cancel_token(task_id)
     
     # 更新任务状态为processing
     await task_manager.update_task(
@@ -560,6 +569,7 @@ async def process_transcode_task(
                 output_format=output_format,
                 progress_callback=_thread_safe_progress_cb,
                 stats=stats,
+                should_cancel=cancel_token.is_set,
             )
         )
 
@@ -603,6 +613,19 @@ async def process_transcode_task(
 
         logger.info(f"任务 {task_id} 处理完成，输出文件数: {len(files)}")
         
+    except TaskCancelled:
+        # 协作式取消：正常控制流，标记 cancelled 后直接返回（不 re-raise，
+        # 以免任务队列的异常分支再把它覆盖成 failed）
+        await task_manager.update_task(
+            task_id=task_id,
+            status="cancelled",
+            message="任务已取消",
+            error_message="cancelled by user",
+        )
+        REGISTRY.inc("subai_task_cancelled_total")
+        logger.info("任务 %s 已被用户取消（协作式中止）", task_id)
+        return
+
     except Exception as e:
         # 更新任务状态为failed
         await task_manager.update_task(
@@ -614,8 +637,9 @@ async def process_transcode_task(
         logger.error(f"任务 {task_id} 处理失败: {e}", exc_info=True)
         raise
     finally:
-        # 清空全局task_id
+        # 清空全局task_id 与取消令牌
         progress_callback_task_id = ""
+        unregister_cancel_token(task_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -979,12 +1003,13 @@ async def delete_task(
     """
     取消/删除任务（需认证，普通用户只能操作自己的任务）
 
-    - 正在排队的任务：直接从队列移除并标记 cancelled
-    - 处理中的任务：标记 cancelled（实际停止依赖 pipeline 协作检查）
-    - 已完成任务：仅做软删除（标记 archived）
+    - 正在处理的任务：置位协作式取消令牌，流水线会在**下一个检查点**主动中止
+      （抽音轨前 / 识别后 / 每个翻译批次前 / 写盘前），并标记 cancelled；
+    - 正在排队的任务：同样置位并标记 cancelled；
+    - 已完成任务：仅做软删除（标记 archived）。
 
-    注意：长任务真正的硬中止需要 pipeline 协做支持——这里先做软取消，
-    状态字段直接置为 cancelled（前端按失败处理）。
+    说明：Python 线程无法被安全强杀，因此采用协作式取消；中止粒度取决于当前
+    处于哪一步——最坏情况是"当前这一步跑完"（例如 ASR 推理本身不可中断）。
     """
     global task_manager, task_queue_obj
 
@@ -1004,14 +1029,21 @@ async def delete_task(
         )
         return {"task_id": task_id, "message": "已归档"}
 
+    # 先置位协作式取消令牌：若任务正在执行，流水线会在下一个检查点主动中止
+    signalled = cancel_task_token(task_id)
+
     # 进行中或排队：标记 cancelled
     await task_manager.update_task(
         task_id=task_id,
         status="cancelled",
-        message="用户已取消",
+        message="用户已取消（已通知执行线程中止）" if signalled else "用户已取消",
         error_message="cancelled by user"
     )
-    return {"task_id": task_id, "message": "已标记取消（pipeline 协做后真正中止）"}
+    return {
+        "task_id": task_id,
+        "message": "已取消，执行线程将在下一个检查点中止" if signalled else "已取消",
+        "signalled": signalled,
+    }
 
 
 @app.get("/api/output/{filename}")
