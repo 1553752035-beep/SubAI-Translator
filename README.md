@@ -113,6 +113,8 @@ npm run test:watch
 
 当前规模：后端 **272** 项、前端 **19** 项（随迭代增长）。端到端用例会真实调用 ASR / OCR / FFmpeg，缺少模型或 FFmpeg 时自动跳过。
 
+持续集成：`.github/workflows/ci.yml`（后端 pytest + 前端 vitest）。
+
 ## GPU 加速（可选）
 
 语音识别默认自动选择设备：`auto` 会**同时满足**「CTranslate2 支持 CUDA + 能找到 CUDA DLL + 空闲显存 ≥4GB」时使用 GPU，否则安全回落到 CPU（不会因缺库而直接失败）。
