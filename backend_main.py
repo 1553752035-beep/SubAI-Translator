@@ -10,6 +10,8 @@ SubAI Translator —— 后端打包入口（PyInstaller）
 - models/（ASR 模型）、bin/（FFmpeg）、data/（数据库）、output/（输出）
   均位于 exe 同级目录，由 config.py 的 _project_root() 在 frozen 环境下自动定位。
 """
+import sys
+
 import uvicorn
 
 from src.api.server import app
@@ -31,6 +33,12 @@ def _ssl_kwargs() -> dict:
 
 
 if __name__ == "__main__":
+    # 环境自检：绿色版无需 Python 也能用
+    #   subai-backend.exe --check [--full]
+    if "--check" in sys.argv:
+        from src.selfcheck import main as _selfcheck
+        sys.exit(_selfcheck([a for a in sys.argv[1:] if a != "--check"]))
+
     uvicorn.run(
         app,
         host=config.server.host,

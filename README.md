@@ -53,6 +53,34 @@ npm run tauri:dev      # 桌面应用
 4. 在字幕编辑器里微调译文
 5. 导出字幕文件（SRT / VTT / ASS / JSON）
 
+## 部署到另一台机器
+
+程序不依赖写死的绝对路径：所有目录都由**安装位置**推导（源码运行时为仓库根，绿色版为 exe 同级目录）。
+
+### 先自检，再使用
+
+```powershell
+# 源码方式
+python tools/selfcheck.py            # 快速自检（秒级）
+python tools/selfcheck.py --full     # 额外做真实推理抽样（较慢）
+
+# 绿色版（无需 Python）
+subai-backend.exe --check
+subai-backend.exe --check --full
+```
+
+自检逐项检查：运行环境与依赖、FFmpeg（含 libx264）、ASR 模型、目录可写性、翻译后端连通性、GPU/CPU 判定、端口占用。
+**每个失败项都会给出可执行的修复建议**，退出码 `0`/`1` 便于脚本判断，`--json` 可机器读取。
+
+### 需要自备的资源
+
+| 资源 | 放置位置 | 说明 |
+|---|---|---|
+| ASR 模型 | `<安装目录>/models/faster-whisper-small/` | 体积较大，不随仓库分发，需另行获取 |
+| FFmpeg | `<安装目录>/bin/ffmpeg.exe`，或加入 PATH | 用于抽音轨与视频压制；缺 libx264 仅影响压制 |
+| 翻译服务 | 自行启动（如 koboldcpp），默认 `http://127.0.0.1:5001/v1/chat/completions` | 也可在设置页切换云端模式 |
+| CUDA 运行库（可选） | `<安装目录>/cuda_dlls/` | 仅在需要 GPU 加速语音识别时，见「GPU 加速（可选）」 |
+
 ## 配置说明
 
 通过环境变量或项目根目录的 `.env` 文件配置，环境变量优先级更高。常用配置项：
