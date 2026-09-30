@@ -13,7 +13,10 @@ SubAI Translator —— 硬字幕 OCR 端到端测试
 """
 from __future__ import annotations
 
+import http.server
+import json
 import os
+import threading
 
 import pytest
 
@@ -112,3 +115,75 @@ class TestHardsubEndToEnd:
             assert r["start"] >= 0.0
             assert r["end"] >= r["start"] + 0.4      # 实现保证 ≥ start + 0.5
             assert r["end"] <= total + 0.6           # 不应超出视频时长太多
+
+class _MockLLM:
+    """极简 OpenAI 兼容服务（批量回编号译文，单行回 'T:原文'）。"""
+
+    def __init__(self):
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                n = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                prompt = body.get("messages", [{}])[-1].get("content", "")
+                if "Translate each numbered" in prompt:
+                    out = []
+                    for line in prompt.splitlines():
+                        s = line.strip()
+                        if s and s[0].isdigit() and ". " in s:
+                            k, _, text = s.partition(". ")
+                            out.append(k + ". T:" + text)
+                    content = "\n".join(out)
+                else:
+                    content = "T:" + prompt
+                data = json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d/v1/chat/completions" % self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@requires_ocr
+class TestHardsubThroughPipeline:
+    """mode='hardsub' 走完整 run_pipeline（此前只直接测过 hardsub_segments）。"""
+
+    def test_run_pipeline_hardsub_branch(self, monkeypatch, tmp_path):
+        from src.config import config
+
+        expected = "硬字幕翻译测试"
+        video = _make_video(str(tmp_path / "hs.avi"), [(expected, 2.0)])
+        llm = _MockLLM()
+        try:
+            monkeypatch.setattr(pipeline, "OUT_DIR", str(tmp_path / "out"))
+            monkeypatch.setattr(pipeline, "TMP_DIR", str(tmp_path / "tmp"))
+            monkeypatch.setattr(config.cache, "db_path", str(tmp_path / "cache.db"))
+            monkeypatch.setattr(config.llm, "mode", "local")
+            monkeypatch.setattr(config.llm, "local_url", llm.url)
+            monkeypatch.setattr(config.llm, "retry_delay", 0.0)
+
+            stats: dict = {}
+            files = pipeline.run_pipeline(
+                video=video, mode="hardsub", target_lang="en",
+                output_format="srt", stats=stats,
+            )
+
+            assert stats["total"] > 0, "hardsub 未产出字幕行"
+            assert stats["failed"] == 0
+            en = [f for f in files if f.endswith(".en.srt")][0]
+            body = open(en, encoding="utf-8").read()
+            assert "T:" in body and "-->" in body
+        finally:
+            llm.close()

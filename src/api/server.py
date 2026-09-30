@@ -566,6 +566,8 @@ async def process_transcode_task(
         files = result if isinstance(result, list) else []
         failed = int(stats.get("failed", 0) or 0)
         total = int(stats.get("total", 0) or 0)
+        terms = int(stats.get("terms", 0) or 0)
+        cache_hits = int(stats.get("cache_hits", 0) or 0)
 
         if total and failed >= total:
             # 翻译整体失败：任务标记失败，但保留识别结果（run_pipeline 已额外输出原文转录）
@@ -584,7 +586,7 @@ async def process_transcode_task(
                 task_id=task_id,
                 status="completed",
                 progress=1.0,
-                message="完成（%d/%d 行未翻译，已保留原文）" % (failed, total),
+                message="完成（%d/%d 行未翻译，已保留原文 · 术语命中 %d · 缓存命中 %d）" % (failed, total, terms, cache_hits),
                 result_files=files,
             )
             REGISTRY.inc("subai_task_completed_total")
@@ -594,7 +596,7 @@ async def process_transcode_task(
                 task_id=task_id,
                 status="completed",
                 progress=1.0,
-                message="任务完成",
+                message="任务完成（%d 行 · 术语命中 %d · 缓存命中 %d）" % (total, terms, cache_hits),
                 result_files=files,
             )
             REGISTRY.inc("subai_task_completed_total")
