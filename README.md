@@ -94,6 +94,25 @@ D:\SubAI-Translator
 - **云端翻译返回 401**：检查 `SUBAI_LLM_CLOUD_API_KEY` 是否已正确配置
 - **端口被占用**：修改 `SUBAI_SERVER_PORT` 环境变量后重启后端
 
+## 测试
+
+**后端（pytest）**
+
+```powershell
+cd 源码
+$env:RUN_API_TESTS=1; python -m pytest tests -q
+```
+
+**前端（vitest + Testing Library）**
+
+```powershell
+cd 源码/frontend
+npm test          # 单次运行
+npm run test:watch
+```
+
+当前规模：后端 **272** 项、前端 **19** 项（随迭代增长）。端到端用例会真实调用 ASR / OCR / FFmpeg，缺少模型或 FFmpeg 时自动跳过。
+
 ## GPU 加速（可选）
 
 语音识别默认自动选择设备：`auto` 会**同时满足**「CTranslate2 支持 CUDA + 能找到 CUDA DLL + 空闲显存 ≥4GB」时使用 GPU，否则安全回落到 CPU（不会因缺库而直接失败）。

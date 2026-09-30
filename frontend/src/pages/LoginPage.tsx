@@ -12,7 +12,7 @@ type MsgKind = 'error' | 'info' | 'ok';
 const BACKEND_URL = 'http://localhost:8000';
 
 /** 把 axios / FastAPI 的错误整理成用户能看懂的一句话 */
-function formatError(err: any): string {
+export function formatError(err: any): string {
   // 没有任何响应：网络层失败（后端未启动 / 端口未监听 / 跨域被拒）
   if (!err || !err.response) {
     return '无法连接后端服务（' + BACKEND_URL + '）。请确认后端已启动，可点击下方“重试连接后端”。';
