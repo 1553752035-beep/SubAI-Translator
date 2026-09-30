@@ -8,10 +8,19 @@ import {
   getCurrentUser,
   getLlmStatus,
   getQueueStats,
+  getTranslationSettings,
   setLlmMode,
+  setTermMode,
   testLlm,
 } from '../api';
-import type { AsrDeviceInfo, CacheStats, LlmStatus, QueueStats, UserInfo } from '../types';
+import type {
+  AsrDeviceInfo,
+  CacheStats,
+  LlmStatus,
+  QueueStats,
+  TranslationSettings,
+  UserInfo,
+} from '../types';
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -29,6 +38,7 @@ export function SettingsPage() {
   const [llm, setLlm] = useState<LlmStatus | null>(null);
   const [cache, setCache] = useState<CacheStats | null>(null);
   const [queue, setQueue] = useState<QueueStats | null>(null);
+  const [term, setTerm] = useState<TranslationSettings | null>(null);
   const [adminNote, setAdminNote] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -46,6 +56,7 @@ export function SettingsPage() {
     try { setMe(await getCurrentUser()); } catch { /* 忽略 */ }
     try { setHealth(await checkHealth()); } catch { setHealth(null); }
     try { setAsr(await getAsrDevice()); } catch { setAsr(null); }
+    try { setTerm(await getTranslationSettings()); } catch { setTerm(null); }
     try {
       const s = await getLlmStatus();
       setLlm(s);
@@ -64,6 +75,21 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const switchTermMode = async (mode: string) => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const s = await setTermMode(mode);
+      setTerm((prev) => (prev ? { ...prev, term_mode: s.term_mode } : prev));
+      setMsg('术语模式已切换为' + (s.term_mode === 'hint' ? '软提示' : '强制锁定'));
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      setMsg(typeof detail === 'string' ? detail : '切换术语模式失败');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const switchMode = async (mode: string) => {
     setBusy(true);
@@ -196,6 +222,25 @@ export function SettingsPage() {
               本地模式：启动本地翻译服务（如 koboldcpp）并监听 5001 的 OpenAI 兼容端点。<br />
               云端模式：填写 OpenAI 兼容地址、模型名与 API Key 后点“使用云端 API”。<br />
               两者都不可用时，任务会在翻译阶段失败；修改会写入后端 .env 并持久化。
+            </div>
+          </div>
+        </div>
+
+        <div className="table-card">
+          <div className="table-head"><div className="t">术语库模式</div></div>
+          <div className="set-body">
+            <Row
+              label="当前模式"
+              value={term ? (term.term_mode === 'hint' ? '软提示' : '强制锁定') : '-'}
+            />
+            <div className="set-actions">
+              <button className="btn" disabled={busy} onClick={() => void switchTermMode('strict')}>强制锁定</button>
+              <button className="btn" disabled={busy} onClick={() => void switchTermMode('hint')}>软提示</button>
+            </div>
+            <div className="set-hint">
+              强制锁定：术语译名 100% 一致（占位符替换后再还原），术语作定语时句式可能略生硬。<br />
+              软提示：把命中的术语作为"必须使用"的要求交给模型，语句更自然，但不保证逐字一致。<br />
+              两种模式下，命中术语的字幕行都不会使用翻译缓存（术语改动后必须重译）。
             </div>
           </div>
         </div>

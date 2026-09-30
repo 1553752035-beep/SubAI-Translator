@@ -364,6 +364,14 @@ def _protect_terms(text: str, terms: dict[str, str]) -> tuple[str, dict[str, str
     return out, mapping
 
 
+def _glossary_hint(hit: dict[str, str]) -> str:
+    """软提示模式下的术语要求片段（长词优先，避免短词先出现造成歧义）。"""
+    if not hit:
+        return ""
+    items = "; ".join("%s = %s" % (k, v) for k, v in sorted(hit.items(), key=lambda kv: -len(kv[0])))
+    return "\nRequired terminology (you MUST use these exact translations): " + items
+
+
 def _restore_terms(text: str, mapping: dict[str, str]) -> str:
     """把译文中保留下来的占位符还原为术语译文。"""
     out = text
@@ -381,6 +389,7 @@ def translate(
     use_cache: bool = True,
     stats: Optional[dict] = None,
     should_cancel: Optional[Callable] = None,
+    term_mode: Optional[str] = None,
 ) -> list[str]:
     """
     逐批复用一次请求翻译多行（编号协议），解析失败自动退回逐行翻译。
@@ -413,13 +422,24 @@ def translate(
         else:
             todo.append(i)
 
-    # 句中命中：占位符保护
+    # 句中命中：按模式处理
+    #   strict —— 占位符替换，译名强制一致；
+    #   hint   —— 不改写原文，只把命中的术语作为"必须使用"的要求随提示词交给模型。
+    mode = (term_mode or _cfg.term.mode or "strict").strip().lower()
+    if mode not in ("strict", "hint"):
+        mode = "strict"
+
     protected: dict[int, tuple[str, dict]] = {}
+    applied: dict[int, dict] = {}
     term_lines: set = set()
     for i in todo:
-        ptext, mapping = _protect_terms(texts[i], terms)
-        protected[i] = (ptext, mapping)
-        if mapping:
+        hit = {src: terms[src] for src in terms if src and src in texts[i]}
+        applied[i] = hit
+        if mode == "strict":
+            protected[i] = _protect_terms(texts[i], hit)
+        else:
+            protected[i] = (texts[i], {})
+        if hit:
             term_lines.add(i)
 
     if stats is not None:
@@ -480,6 +500,8 @@ def translate(
             """单行翻译（含术语占位符保护）；失败不抛异常，只记录并留空。"""
             nonlocal n_batch, failed
             ptext, mapping = protected[i]
+            if mapping == {} and applied.get(i):
+                ptext = ptext + _glossary_hint(applied[i])
             try:
                 out[i] = _restore_terms(_call_llm(ptext, target), mapping)
                 n_batch += 1
@@ -495,9 +517,13 @@ def translate(
             block = "\n".join(
                 "%d. %s" % (n + 1, protected[i][0]) for n, i in enumerate(idxs)
             )
+            glossary: dict = {}
+            for i in idxs:
+                glossary.update(applied.get(i, {}))
+            hint = _glossary_hint(glossary) if mode == "hint" else ""
             prompt = ("Translate each numbered Chinese subtitle line into %s. "
                       "Keep the same numbering, one line per input line, output nothing else. "
-                      "Keep any [[T#]] placeholder unchanged.\n\n%s" % (target, block))
+                      "Keep any [[T#]] placeholder unchanged.%s\n\n%s" % (target, hint, block))
 
             try:
                 raw = _call_llm(prompt, target)
@@ -540,8 +566,8 @@ def translate(
             stats["failed"] = failed
 
         dt = time.time() - t0
-        log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d / 失败 %d 行）"
-            % (len(texts), target, n_batch, dt, int((stats or {}).get("terms", 0)), cache_hits, failed))
+        log("  [翻译] %d 行 -> %s | 模式=%s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d / 失败 %d 行）"
+            % (len(texts), target, mode, n_batch, dt, int((stats or {}).get("terms", 0)), cache_hits, failed))
 
         if progress_callback:
             progress_callback(0.95, "翻译完成")

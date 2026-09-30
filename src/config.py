@@ -187,6 +187,15 @@ class LLMConfig(BaseSettings):
     retry_delay: float = Field(default=1.0, description="重试初始延迟（秒，指数退避）")
 
 
+class TermConfig(BaseSettings):
+    """术语库行为配置"""
+    model_config = SettingsConfigDict(env_prefix="SUBAI_TERM_")
+
+    # strict=强制锁定（占位符替换，译名 100% 一致，术语作定语时句式可能略生硬）
+    # hint  =软提示（把术语作为要求随提示词交给模型，语句更自然，但不保证逐字一致）
+    mode: str = Field(default="strict", description="术语模式: strict|hint")
+
+
 class OCRConfig(BaseSettings):
     """OCR（硬字幕识别）配置"""
     model_config = SettingsConfigDict(env_prefix="SUBAI_OCR_")
@@ -324,6 +333,7 @@ class SubAIConfig(BaseSettings):
     paths: PathConfig = Field(default_factory=PathConfig)
     asr: ASRConfig = Field(default_factory=ASRConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    term: TermConfig = Field(default_factory=TermConfig)
     ocr: OCRConfig = Field(default_factory=OCRConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)

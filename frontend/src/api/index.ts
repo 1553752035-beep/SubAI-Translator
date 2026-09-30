@@ -18,6 +18,7 @@ import type {
   VoicesResponse,
   MediaOutput,
   DubResult,
+  TranslationSettings,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -284,4 +285,18 @@ export const dubSubtitles = async (payload: {
 }): Promise<DubResult> => {
   const response = await api.post('/tts/dub', payload, { timeout: 0 });
   return response.data as DubResult;
+};
+
+// --------------------------------------------------------------------------- //
+// 翻译设置（术语模式）
+// --------------------------------------------------------------------------- //
+
+export const getTranslationSettings = async (): Promise<TranslationSettings> => {
+  const response = await api.get('/translation/settings');
+  return response.data as TranslationSettings;
+};
+
+export const setTermMode = async (mode: string): Promise<{ term_mode: string }> => {
+  const response = await api.post('/translation/term-mode', { mode });
+  return response.data as { term_mode: string };
 };

@@ -1587,6 +1587,50 @@ async def llm_set_mode(request: LlmModeRequest, current_user: UserRecord = Depen
 
 
 # --------------------------------------------------------------------------- #
+# 术语模式（强制锁定 / 软提示）
+# --------------------------------------------------------------------------- #
+
+class TermModeRequest(BaseModel):
+    """术语模式切换请求"""
+    mode: str
+
+
+@app.get("/api/translation/settings")
+async def translation_settings(current_user: UserRecord = Depends(get_current_user)):
+    """翻译相关设置（当前仅术语模式）。"""
+    return {
+        "term_mode": config.term.mode,
+        "available": [
+            {
+                "value": "strict",
+                "label": "强制锁定",
+                "description": "术语译名 100% 一致；术语作定语时句式可能略生硬",
+            },
+            {
+                "value": "hint",
+                "label": "软提示",
+                "description": "把术语作为要求交给模型，语句更自然，但不保证逐字一致",
+            },
+        ],
+    }
+
+
+@app.post("/api/translation/term-mode")
+async def set_term_mode(request: TermModeRequest, current_user: UserRecord = Depends(get_current_admin)):
+    """切换术语模式（仅管理员），并持久化到 .env。"""
+    mode = (request.mode or "").strip().lower()
+    if mode not in ("strict", "hint"):
+        raise HTTPException(status_code=400, detail="mode 必须是 strict / hint")
+
+    config.term.mode = mode
+    try:
+        persist_env({"SUBAI_TERM_MODE": mode})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("持久化术语模式失败: %s", e)
+    return {"term_mode": config.term.mode}
+
+
+# --------------------------------------------------------------------------- #
 # 字幕读取与写回（在线字幕编辑）
 # --------------------------------------------------------------------------- #
 

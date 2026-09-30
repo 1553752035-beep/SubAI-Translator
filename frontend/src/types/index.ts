@@ -188,3 +188,15 @@ export interface DubResult {
   engine: string;
   filename: string;
 }
+
+// 翻译设置（术语模式）
+export interface TranslationOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface TranslationSettings {
+  term_mode: string;
+  available: TranslationOption[];
+}
