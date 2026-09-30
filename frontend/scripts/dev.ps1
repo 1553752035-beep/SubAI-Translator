@@ -1,4 +1,4 @@
-# SubAI Translator - 开发模式启动脚本
+﻿# SubAI Translator - 开发模式启动脚本
 # 用于在开发模式下运行 Tauri 应用
 
 Write-Host "===================================" -ForegroundColor Cyan

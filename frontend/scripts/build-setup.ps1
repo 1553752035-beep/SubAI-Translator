@@ -1,4 +1,4 @@
-# SubAI Translator - Windows 打包脚本
+﻿# SubAI Translator - Windows 打包脚本
 # 用于构建和打包 Tauri 应用为 .exe 安装包
 
 Write-Host "===================================" -ForegroundColor Cyan

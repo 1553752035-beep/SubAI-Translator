@@ -209,13 +209,20 @@ def check_asr(out: list, full: bool) -> None:
         return
     audio = ""
     from src.config import config as _c
+    ddir = os.path.dirname(_c.users_db)
     for cand in ("extracted_audio.wav", "tts_test.wav"):
-        p = os.path.join(os.path.dirname(_c.users_db), cand)
+        p = os.path.join(ddir, cand)
         if os.path.isfile(p):
             audio = p
             break
+    if not audio and os.path.isdir(ddir):
+        # 绿色版不一定带自检音频：数据目录下任意 .wav 都可以拿来验证识别链路
+        wavs = sorted(n for n in os.listdir(ddir) if n.lower().endswith(".wav"))
+        if wavs:
+            audio = os.path.join(ddir, wavs[0])
     if not audio:
-        _add(out, "语音识别", "真实识别", _WARN, "未找到自检音频（extracted_audio.wav / tts_test.wav）")
+        _add(out, "语音识别", "真实识别", _WARN,
+             "未找到可用于自检的音频（在 %s 下放任意 .wav 即可验证识别链路）" % ddir)
         return
     try:
         from faster_whisper import WhisperModel
@@ -341,7 +348,8 @@ def main(argv=None) -> int:
 
     results = run_checks(full=args.full)
     if args.json:
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        # ensure_ascii=True：输出纯 ASCII，避免不同控制台/管道编码导致乱码
+        print(json.dumps(results, ensure_ascii=True, indent=2))
         return 1 if any(r["status"] == _FAIL for r in results) else 0
     return report(results)
 
