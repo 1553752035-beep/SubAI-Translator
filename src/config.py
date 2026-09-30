@@ -49,6 +49,88 @@ def _project_root() -> str:
     return str(Path(__file__).parent.parent)
 
 
+# --------------------------------------------------------------------------- #
+# CUDA / GPU 探测（不依赖 torch —— ASR 走的是 CTranslate2）
+# --------------------------------------------------------------------------- #
+
+def cuda_dll_dirs() -> list:
+    """返回可用的 nvidia-* CUDA DLL 目录（cublas / cudnn / nvrtc / runtime）。"""
+    dirs = []
+    bases = []
+    try:
+        import nvidia  # type: ignore
+        # nvidia 是**命名空间包**：__file__ 为 None，必须用 __path__
+        bases.extend(list(getattr(nvidia, "__path__", []) or []))
+        nf = getattr(nvidia, "__file__", None)
+        if nf:
+            bases.append(os.path.dirname(nf))
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not bases:
+        # 兜底：扫描 sys.path 下的 nvidia 目录
+        for entry in sys.path:
+            cand = os.path.join(entry, "nvidia")
+            if os.path.isdir(cand):
+                bases.append(cand)
+
+    # 安装目录下的**可选 GPU 包**（不随主包分发，用户自行放置）：
+    #   <root>/cuda_dlls/{cublas,cudnn,cuda_nvrtc}/bin/*.dll
+    #   <root>/cuda_dlls/nvidia/{...}/bin/*.dll
+    root = _project_root()
+    for extra in (os.path.join(root, "cuda_dlls"), os.path.join(root, "cuda_dlls", "nvidia")):
+        if os.path.isdir(extra):
+            bases.append(extra)
+
+    for base in bases:
+        for sub in ("cublas", "cudnn", "cuda_nvrtc", "cuda_runtime"):
+            d = os.path.join(base, sub, "bin")
+            if os.path.isdir(d) and d not in dirs:
+                dirs.append(d)
+    return dirs
+
+
+def ensure_cuda_dll_path() -> list:
+    """把 CUDA DLL 目录加入进程搜索路径（Windows 下 CTranslate2 靠它加载 cuBLAS/cuDNN）。
+
+    Returns: 实际加入的目录列表。
+    """
+    dirs = cuda_dll_dirs()
+    if not dirs:
+        return []
+    os.environ["PATH"] = os.pathsep.join(dirs) + os.pathsep + os.environ.get("PATH", "")
+    if hasattr(os, "add_dll_directory"):
+        for d in dirs:
+            try:
+                os.add_dll_directory(d)
+            except Exception:  # noqa: BLE001
+                pass
+    return dirs
+
+
+def ct2_cuda_supported() -> bool:
+    """CTranslate2 是否编译了 CUDA 支持。"""
+    try:
+        import ctranslate2  # type: ignore
+        return bool(ctranslate2.get_supported_compute_types("cuda"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def free_vram_gb():
+    """通过 nvidia-smi 读取空闲显存（GB）；不可用返回 None。"""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        line = (out.stdout or "").strip().splitlines()[0]
+        return int(line) / 1024.0
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class PathConfig(BaseModel):
     """路径配置"""
     root: str = Field(default_factory=_project_root)
@@ -309,28 +391,58 @@ class SubAIConfig(BaseSettings):
             return self.concurrency.local_max_concurrent
     
     def get_asr_device(self) -> tuple[str, str]:
-        """
-        获取ASR设备和计算类型
-        
+        """获取 ASR 设备与计算类型。
+
+        重要（v3.1.2）:检测**不再依赖 torch**。faster-whisper 的推理后端是
+        CTranslate2,GPU 能力由它提供;此前用 CPU 版 torch 的 cuda.is_available()
+        判断,会永远得到 False,即使 GPU 空闲也强制走 CPU。
+
+        判定顺序（auto）:
+          1. CTranslate2 是否支持 CUDA（否则 CPU）
+          2. 能否找到 CUDA DLL（cublas/cudnn,否则 CUDA 加载必失败 -> CPU）
+          3. nvidia-smi 空闲显存是否充足（默认 ≥4GB）;torch 仅作兜底
+
         Returns:
             (device, compute_type) 元组
         """
-        if self.asr.device == "auto":
-            # 自动检测：检查是否有可用GPU且显存充足
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    # 检查显存是否充足（至少4GB）
-                    free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
-                    if free_mem >= 4.0:
-                        return ("cuda", "float16")
-            except:
-                pass
+        dev = (self.asr.device or "auto").lower()
+        ct = "float16" if (not self.asr.compute_type or self.asr.compute_type == "auto") \
+            else self.asr.compute_type
+
+        if dev == "cuda":
+            return ("cuda", ct)
+        if dev == "cpu":
             return ("cpu", "int8")
-        elif self.asr.device == "cuda":
-            return ("cuda", "float16")
-        else:
+
+        if not ct2_cuda_supported():
             return ("cpu", "int8")
+        if not cuda_dll_dirs():
+            return ("cpu", "int8")
+
+        free = free_vram_gb()
+        if free is not None:
+            return ("cuda", ct) if free >= 4.0 else ("cpu", "int8")
+
+        # nvidia-smi 不可用时退回 torch（若装的是 CUDA 版）
+        try:
+            import torch  # type: ignore
+            if torch.cuda.is_available() and torch.cuda.mem_get_info()[0] / (1024 ** 3) >= 4.0:
+                return ("cuda", ct)
+        except Exception:  # noqa: BLE001
+            pass
+        return ("cpu", "int8")
+
+    def describe_asr_device(self) -> dict:
+        """给 API/排障用的设备明细（不加载模型）。"""
+        device, compute = self.get_asr_device()
+        return {
+            "configured": self.asr.device,
+            "effective_device": device,
+            "compute_type": compute,
+            "ct2_cuda_supported": ct2_cuda_supported(),
+            "cuda_dll_dirs": cuda_dll_dirs(),
+            "free_vram_gb": free_vram_gb(),
+        }
     
     def get_llm_endpoint(self) -> tuple[str, str, str]:
         """

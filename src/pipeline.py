@@ -37,7 +37,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.db.terminology import TerminologyManager
-from src.config import config as _cfg
+from src.config import config as _cfg, ensure_cuda_dll_path
 from src.cache.translation_cache import TranslationCache
 from src.retry import retry, RetryExhausted
 
@@ -148,8 +148,11 @@ def asr_segments(wav: str, language: Optional[str], progress_callback: Optional[
     if not os.path.isdir(MODEL_DIR):
         raise RuntimeError("未找到本地模型目录 %s" % MODEL_DIR)
 
-    # 走 config 自动检测设备（auto → 有 4G+ 空闲显存才用 cuda，否则 cpu）
+    # 走 config 自动检测设备（auto → CTranslate2 支持 CUDA + 显存充足才用 cuda）
     device, compute_type = _cfg.get_asr_device()
+    if device == "cuda":
+        # CTranslate2 通过 LoadLibrary 加载 cuBLAS/cuDNN，需先把 DLL 目录加入搜索路径
+        ensure_cuda_dll_path()
     model = WhisperModel(MODEL_DIR, device=device, compute_type=compute_type,
                          cpu_threads=_cfg.asr.cpu_threads)
     t_load = time.time() - t0

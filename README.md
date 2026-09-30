@@ -94,6 +94,22 @@ D:\SubAI-Translator
 - **云端翻译返回 401**：检查 `SUBAI_LLM_CLOUD_API_KEY` 是否已正确配置
 - **端口被占用**：修改 `SUBAI_SERVER_PORT` 环境变量后重启后端
 
+## GPU 加速（可选）
+
+语音识别默认自动选择设备：`auto` 会**同时满足**「CTranslate2 支持 CUDA + 能找到 CUDA DLL + 空闲显存 ≥4GB」时使用 GPU，否则安全回落到 CPU（不会因缺库而直接失败）。
+
+- **开发环境**：安装 `nvidia-cublas-cu12`、`nvidia-cudnn-cu12` 即可，程序会自动把它们的 `bin` 目录加入 DLL 搜索路径。
+- **绿色版主包不包含 CUDA 运行库（约 2.0 GB）**。如需 GPU 加速，可自行把运行库按下面结构放到安装目录，程序会自动识别：
+
+```
+cuda_dlls/
+├── cublas/bin/cublas64_12.dll 等
+├── cudnn/bin/cudnn64_9.dll 等
+└── cuda_nvrtc/bin/nvrtc*.dll
+```
+
+- 当前生效设备与判定依据可通过 `GET /api/system/asr-device` 查看，或看日志里的 `[ASR]` 行。
+
 ## 许可证
 
 本项目采用 **MIT** 许可证，详见 [LICENSE](LICENSE)。

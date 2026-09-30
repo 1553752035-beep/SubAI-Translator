@@ -635,6 +635,12 @@ async def health_check():
     )
 
 
+@app.get("/api/system/asr-device")
+async def asr_device_info(current_user: UserRecord = Depends(get_current_user)):
+    """ASR 设备明细（配置值 / 实际生效值 / CUDA 支持 / 空闲显存 / DLL 目录）。"""
+    return config.describe_asr_device()
+
+
 @app.get("/api/metrics")
 async def metrics():
     """
