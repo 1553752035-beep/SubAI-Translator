@@ -41,12 +41,31 @@ class TestPipelineE2E:
         pytest.importorskip("cv2")
 
     @pytest.fixture
-    def _require_asr_model(self):
-        """ASR 模型文件缺失时跳过（模型体积大，不随代码仓库分发）"""
+    def _require_asr_model(self, monkeypatch):
+        """ASR 模型文件缺失时跳过（模型体积大，不随代码仓库分发）。
+
+        修复:原实现把 config.models_dir 又拼了一次 "faster-whisper-small"
+        （config.models_dir 本身已指向该目录），导致路径重复、这 4 个用例**永远跳过**。
+        现按"配置值 -> 上一级 models 目录"依次探测，并把解析结果写回 pipeline 的模块常量，
+        否则 run_pipeline 仍会用错误的 MODEL_DIR。
+        """
+        import src.pipeline as _pl
         from src.config import config as _cfg
-        asr_dir = os.path.join(_cfg.models_dir, "faster-whisper-small")
-        if not os.path.isdir(asr_dir):
-            pytest.skip("ASR 模型目录不存在：%s" % asr_dir)
+
+        candidates = [
+            _cfg.models_dir,
+            os.path.join(os.path.dirname(ROOT), "models", "faster-whisper-small"),
+        ]
+        asr_dir = next((d for d in candidates if d and os.path.isdir(d)), None)
+        if asr_dir is None:
+            pytest.skip("ASR 模型目录不存在：%s" % _cfg.models_dir)
+        monkeypatch.setattr(_pl, "MODEL_DIR", asr_dir)
+
+        # FFmpeg 同理：开发环境下不在 源码/bin，需要回退到上一级 bin
+        for cand in (_cfg.ffmpeg, os.path.join(os.path.dirname(ROOT), "bin", "ffmpeg.exe")):
+            if cand and os.path.isfile(cand):
+                monkeypatch.setattr(_pl, "FFMPEG", cand)
+                break
 
     @pytest.fixture
     def _require_llm_service(self):

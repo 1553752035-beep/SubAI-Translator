@@ -344,6 +344,33 @@ def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[ass
         raise RuntimeError(f"翻译请求失败: {e}")
 
 
+def _protect_terms(text: str, terms: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """把句中出现命中的术语替换为占位符（**长词优先**），返回 (受保护文本, 占位符->译文)。
+
+    为什么要占位符:术语往往是句子的一部分（如"人工智能"出现在
+    "欢迎使用人工智能视频字幕翻译软件"里），既要让译名固定,又不能丢掉上下文,
+    因此先替换成 [[T0]] 这类记号、翻译后再还原。
+    """
+    mapping: dict[str, str] = {}
+    out = text
+    n = 0
+    for src in sorted(terms.keys(), key=len, reverse=True):
+        if src and src in out:
+            ph = "[[T%d]]" % n
+            n += 1
+            out = out.replace(src, ph)
+            mapping[ph] = terms[src]
+    return out, mapping
+
+
+def _restore_terms(text: str, mapping: dict[str, str]) -> str:
+    """把译文中保留下来的占位符还原为术语译文。"""
+    out = text
+    for ph, tgt in mapping.items():
+        out = out.replace(ph, tgt)
+    return out
+
+
 def translate(
     texts: list[str],
     target: str,
@@ -356,13 +383,17 @@ def translate(
     """
     逐批复用一次请求翻译多行（编号协议），解析失败自动退回逐行翻译。
 
-    容错策略（v3.1.1）：
-    - 术语库命中与缓存命中直接返回，不送 LLM；
-    - 批量请求失败或解析不全时退回逐行；逐行仍失败的行**不抛异常**，记为失败并留空，
-      同时写入 stats["failed"]。是否额外输出原文转录由 run_pipeline 决定。
-      这样"翻译后端不可用"不会导致 ASR 识别结果整体丢失。
+    术语处理（v3.1.6 改进）：
+    - 整行恰好等于术语 → 直接采用术语译文，不送 LLM；
+    - 术语出现在句中 → 先替换为 [[T#]] 占位符再送 LLM，译文回来后还原，
+      既固定专有名词译名，又不破坏上下文（此前只支持整行精确匹配，
+      导致真实字幕里的术语几乎永远不命中）。
+    - 命中术语的行**不读也不写缓存**：其译文取决于术语库，术语一旦修改，
+      缓存必须失效，因此直接跳过以保证正确性。
 
-    stats（可选，出参）: total / terms / cache_hits / llm_requests / failed
+    容错：单行翻译失败不抛异常，留空并计入 stats["failed"]。
+
+    stats（出参）: total / terms / cache_hits / llm_requests / failed
     """
     t0 = time.time()
     out: list[str] = [""] * len(texts)
@@ -371,21 +402,36 @@ def translate(
     if stats is not None:
         stats.update({"total": len(texts), "terms": 0, "cache_hits": 0, "llm_requests": 0, "failed": 0})
 
-    # 术语库优先：命中即锁定，不送 LLM
+    # 整行精确命中：直接用术语译文
+    exact_hits = 0
     for i, t in enumerate(texts):
         if t in terms:
             out[i] = terms[t]
+            exact_hits += 1
         else:
             todo.append(i)
+
+    # 句中命中：占位符保护
+    protected: dict[int, tuple[str, dict]] = {}
+    term_lines: set = set()
+    for i in todo:
+        ptext, mapping = _protect_terms(texts[i], terms)
+        protected[i] = (ptext, mapping)
+        if mapping:
+            term_lines.add(i)
+
     if stats is not None:
-        stats["terms"] = len(texts) - len(todo)
+        stats["terms"] = exact_hits + len(term_lines)
 
     cache_hits = 0
     todo_after_cache: list[int] = []
     cache_obj: Optional[TranslationCache] = None
     cache_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    if use_cache and todo:
+    # 术语命中的行跳过缓存（见 docstring）
+    cacheable = [i for i in todo if i not in term_lines]
+
+    if use_cache and cacheable:
         try:
             cache_loop = asyncio.new_event_loop()
             cache_obj = TranslationCache(
@@ -404,6 +450,9 @@ def translate(
     try:
         if cache_obj is not None and cache_loop is not None:
             for i in todo:
+                if i in term_lines:
+                    todo_after_cache.append(i)
+                    continue
                 cached = None
                 try:
                     cached = cache_loop.run_until_complete(cache_obj.get(texts[i], target))
@@ -426,10 +475,11 @@ def translate(
         current_batch = 0
 
         def _translate_one(i: int) -> None:
-            """单行翻译；失败不抛异常，只记录并留空。"""
+            """单行翻译（含术语占位符保护）；失败不抛异常，只记录并留空。"""
             nonlocal n_batch, failed
+            ptext, mapping = protected[i]
             try:
-                out[i] = _call_llm(texts[i], target)
+                out[i] = _restore_terms(_call_llm(ptext, target), mapping)
                 n_batch += 1
             except Exception as e:  # noqa: BLE001
                 out[i] = ""
@@ -438,10 +488,12 @@ def translate(
 
         for s in range(0, len(todo_after_cache), batch_size):
             idxs = todo_after_cache[s:s + batch_size]
-            block = "\n".join("%d. %s" % (n + 1, texts[i]) for n, i in enumerate(idxs))
+            block = "\n".join(
+                "%d. %s" % (n + 1, protected[i][0]) for n, i in enumerate(idxs)
+            )
             prompt = ("Translate each numbered Chinese subtitle line into %s. "
-                      "Keep the same numbering, one line per input line, "
-                      "output nothing else.\n\n%s" % (target, block))
+                      "Keep the same numbering, one line per input line, output nothing else. "
+                      "Keep any [[T#]] placeholder unchanged.\n\n%s" % (target, block))
 
             try:
                 raw = _call_llm(prompt, target)
@@ -456,7 +508,7 @@ def translate(
 
                 if len(got) >= len(idxs):
                     for n, i in enumerate(idxs):
-                        out[i] = got.get(n + 1, "")
+                        out[i] = _restore_terms(got.get(n + 1, ""), protected[i][1])
                 else:
                     for i in idxs:
                         _translate_one(i)
@@ -467,6 +519,8 @@ def translate(
 
             if cache_obj is not None and cache_loop is not None:
                 for i in idxs:
+                    if i in term_lines:
+                        continue
                     if out[i] and not out[i].startswith("[翻译失败"):
                         try:
                             cache_loop.run_until_complete(cache_obj.set(texts[i], target, out[i]))
@@ -483,7 +537,7 @@ def translate(
 
         dt = time.time() - t0
         log("  [翻译] %d 行 -> %s | 请求 %d 次 / 耗时 %.2fs（术语命中 %d / 缓存命中 %d / 失败 %d 行）"
-            % (len(texts), target, n_batch, dt, len(texts) - len(todo), cache_hits, failed))
+            % (len(texts), target, n_batch, dt, int((stats or {}).get("terms", 0)), cache_hits, failed))
 
         if progress_callback:
             progress_callback(0.95, "翻译完成")
