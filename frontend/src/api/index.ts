@@ -15,6 +15,9 @@ import type {
   TaskSubtitles,
   SubtitleSegment,
   AsrDeviceInfo,
+  VoicesResponse,
+  MediaOutput,
+  DubResult,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -242,3 +245,43 @@ export const downloadOutput = async (filename: string): Promise<void> => {
 };
 
 export default api;
+
+// --------------------------------------------------------------------------- //
+// 四期：媒体处理（压制 / 封装 / 配音）
+// --------------------------------------------------------------------------- //
+
+export const getVoices = async (): Promise<VoicesResponse> => {
+  const response = await api.get('/tts/voices');
+  return response.data as VoicesResponse;
+};
+
+// 压制/封装/配音都是长任务（FFmpeg 重编码、逐段语音合成），
+// 用 timeout: 0 关闭 30s 默认超时，否则大视频必然中断。
+export const burnHardsub = async (payload: {
+  video_path: string;
+  subtitle_path: string;
+  crf?: number;
+  preset?: string;
+  font_size?: number;
+}): Promise<MediaOutput> => {
+  const response = await api.post('/video/burn', payload, { timeout: 0 });
+  return response.data as MediaOutput;
+};
+
+export const muxSoftsub = async (payload: {
+  video_path: string;
+  tracks: { path: string; language?: string; title?: string }[];
+}): Promise<MediaOutput> => {
+  const response = await api.post('/video/mux', payload, { timeout: 0 });
+  return response.data as MediaOutput;
+};
+
+export const dubSubtitles = async (payload: {
+  segments: { start: number; end: number; text: string }[];
+  language?: string;
+  voice?: string;
+  rate?: number;
+}): Promise<DubResult> => {
+  const response = await api.post('/tts/dub', payload, { timeout: 0 });
+  return response.data as DubResult;
+};

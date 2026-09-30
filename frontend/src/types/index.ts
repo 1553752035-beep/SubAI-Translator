@@ -161,3 +161,30 @@ export interface AsrDeviceInfo {
   cuda_dll_dirs: string[];
   free_vram_gb: number | null;
 }
+
+// 四期：媒体处理（硬字幕压制 / 软字幕封装 / 配音）
+export interface Voice {
+  name: string;
+  culture: string;
+  engine: string;
+}
+
+export interface VoicesResponse {
+  engine: string;
+  voices: Voice[];
+}
+
+export interface MediaOutput {
+  output_path: string;
+  filename: string;
+}
+
+export interface DubResult {
+  merged: string;
+  clips: string[];
+  max_drift_seconds: number;
+  total_seconds: number;
+  voice: string;
+  engine: string;
+  filename: string;
+}

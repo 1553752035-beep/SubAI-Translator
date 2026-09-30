@@ -1503,7 +1503,8 @@ async def tts_dub(request: DubRequest, current_user: UserRecord = Depends(get_cu
     voice = request.voice or voice_for_language(request.language, voices)
     workdir = os.path.join(ensure_output_dir(), "dub_" + uuid.uuid4().hex[:8])
     segments = [s.model_dump() for s in request.segments]
-    merged_name = request.output_name or "dub_merged.wav"
+    # 默认文件名带随机后缀：否则多次配音会互相覆盖同一个 dub_merged.wav
+    merged_name = request.output_name or ("dub_%s.wav" % uuid.uuid4().hex[:8])
 
     loop = asyncio.get_running_loop()
     try:
@@ -1516,6 +1517,18 @@ async def tts_dub(request: DubRequest, current_user: UserRecord = Depends(get_cu
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"语音合成失败: {e}")
+
+    # 合并音轨移到输出根目录：/api/output/{filename} 的路径参数不接受子目录，
+    # 分段 wav 仍留在 workdir，只有合并结果需要能被前端直接下载。
+    merged_src = result.get("merged")
+    if merged_src and os.path.isfile(merged_src):
+        filename = os.path.basename(merged_src)
+        dst = os.path.join(ensure_output_dir(), filename)
+        if os.path.abspath(merged_src) != os.path.abspath(dst):
+            shutil.move(merged_src, dst)
+        result["merged"] = dst
+        result["filename"] = filename
+
     return {**result, "voice": voice, "engine": engine.name}
 
 

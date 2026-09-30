@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { cancelTask, getHistory } from '../api';
+import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
 
@@ -101,6 +102,12 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
             </div>
           )}
         </div>
+        {task.status === 'completed' && (
+          <div style={{ marginTop: '18px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+            <h4 style={{ margin: '0 0 10px', fontSize: '14px' }}>视频与配音</h4>
+            <MediaTools task={task} />
+          </div>
+        )}
         <div style={{ textAlign: 'right' }}>
           <button className="btn" onClick={onClose} style={{ marginTop: '16px' }}>关闭</button>
         </div>
