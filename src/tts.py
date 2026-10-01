@@ -304,12 +304,15 @@ def synthesize_segments(
         merged_name: 合并音轨文件名
 
     Returns:
-        {"merged": str, "clips": [str], "max_drift_seconds": float, "total_seconds": float}
+        {"merged": str, "clips": [str], "max_drift_seconds": float, "total_seconds": float,
+         "silent_clips": int, "silent_indices": [int]}
+        silent_clips > 0 表示有段落"合成成功但没有声音"（常见原因：音色不支持该语言）。
     """
     engine = engine or get_engine()
     os.makedirs(out_dir, exist_ok=True)
 
     clips: list[tuple[float, str]] = []
+    silent: list[int] = []
     for i, seg in enumerate(segments):
         text = (seg.get("text") or "").strip()
         if not text:
@@ -317,10 +320,18 @@ def synthesize_segments(
         raw = os.path.join(out_dir, "dub_%04d.wav" % i)
         engine.synthesize(text, raw, voice=voice, rate=rate)
 
+        # 关键：合成"成功"不等于合成出声音。
+        # SAPI 在音色不支持文本语言时会写出只有文件头、0 采样的 wav
+        # （实测：英文音色读中文 -> 46 字节 / 0.000s），而 os.path.getsize 依然 > 0。
+        # 这类静音若不被识别，会被 build_dub_track 补静音到时间轴，
+        # 表面上"时长/同步偏差"都正常，用户却拿到一条全静音配音。
+        dur = wav_duration(raw)
+        if dur <= 0.01:
+            silent.append(i)
+
         path = raw
         if fit_slot:
             slot = max(0.1, float(seg["end"]) - float(seg["start"]))
-            dur = wav_duration(raw)
             if dur > slot * 1.05:
                 path = _time_fit(raw, os.path.join(out_dir, "dub_%04d_fit.wav" % i), dur / slot)
         clips.append((float(seg["start"]), path))
@@ -334,4 +345,6 @@ def synthesize_segments(
         "clips": [c[1] for c in clips],
         "max_drift_seconds": round(drift, 4),
         "total_seconds": round(total, 3),
+        "silent_clips": len(silent),
+        "silent_indices": silent,
     }

@@ -9,6 +9,7 @@ SubAI Translator —— 语音合成模块测试（四期 4.1）
 from __future__ import annotations
 
 import os
+import wave
 import subprocess
 
 import pytest
@@ -181,3 +182,77 @@ class TestSapiEndToEnd:
         # 验收目标：配音与字幕时间同步误差 <= 0.5s
         assert result["max_drift_seconds"] <= 0.5
         assert abs(wav_duration(result["merged"]) - result["total_seconds"]) < 0.1
+
+# --------------------------------------------------------------------------- #
+# 静音检测（重大：合成"成功"不等于合成出声音）
+# --------------------------------------------------------------------------- #
+
+class _SilentEngine:
+    """模拟"音色不支持该语言"的引擎：合成不报错，但写出 0 采样的 wav。
+
+    实测依据：SAPI 用英文音色读中文时写出 46 字节（仅文件头）、时长 0.000s 的 wav，
+    而 os.path.getsize 依然 > 0，因此只检查文件大小是发现不了的。
+    """
+
+    name = "silent-test"
+
+    def list_voices(self) -> list:
+        return [{"name": "Silent Voice", "culture": "en-US", "engine": self.name}]
+
+    def synthesize(self, text: str, out_wav: str, voice=None, rate: int = 0) -> str:
+        os.makedirs(os.path.dirname(os.path.abspath(out_wav)), exist_ok=True)
+        with wave.open(out_wav, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SAMPLE_RATE)
+            w.writeframes(b"")
+        return out_wav
+
+
+class _ToneEngine:
+    """正常引擎：用 ffmpeg 生成 0.3 秒正弦音，用于验证"不会误报静音"。"""
+
+    name = "tone-test"
+
+    def list_voices(self) -> list:
+        return [{"name": "Tone", "culture": "zh-CN", "engine": self.name}]
+
+    def synthesize(self, text: str, out_wav: str, voice=None, rate: int = 0) -> str:
+        os.makedirs(os.path.dirname(os.path.abspath(out_wav)), exist_ok=True)
+        subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=0.3",
+             "-ar", str(SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le", out_wav],
+            check=True, capture_output=True,
+        )
+        return out_wav
+
+
+@pytest.mark.skipif(FFMPEG is None, reason="未找到 FFmpeg")
+class TestSilentClipDetection:
+    def test_silent_clips_are_reported(self, tmp_path):
+        segs = [
+            {"start": 0.0, "end": 1.0, "text": "第一句"},
+            {"start": 1.2, "end": 2.0, "text": "第二句"},
+        ]
+        result = synthesize_segments(segs, str(tmp_path), engine=_SilentEngine(), fit_slot=True)
+
+        assert result["silent_clips"] == 2
+        assert result["silent_indices"] == [0, 1]
+        # 仍然产出合并音轨，便于上层提示/继续处理
+        assert os.path.exists(result["merged"])
+
+    def test_normal_audio_is_not_flagged(self, tmp_path):
+        segs = [
+            {"start": 0.0, "end": 1.0, "text": "第一句"},
+            {"start": 1.2, "end": 2.0, "text": "第二句"},
+        ]
+        result = synthesize_segments(segs, str(tmp_path), engine=_ToneEngine(), fit_slot=True)
+
+        assert result["silent_clips"] == 0
+        assert result["silent_indices"] == []
+
+    def test_empty_text_is_not_counted(self, tmp_path):
+        segs = [{"start": 0.0, "end": 1.0, "text": "   "}]
+        result = synthesize_segments(segs, str(tmp_path), engine=_SilentEngine(), fit_slot=True)
+        assert result["silent_clips"] == 0

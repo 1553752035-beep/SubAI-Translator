@@ -132,6 +132,41 @@ describe('MediaTools', () => {
     expect(mDub.mock.calls[0][0].segments[0].text).toBe('你好');
   });
 
+  it('配音出现静音段时明确警告，而不是让用户拿到全静音音轨', async () => {
+    mDub.mockResolvedValue({
+      merged: 'D:/out/silent.wav', clips: [], max_drift_seconds: 0, total_seconds: 1,
+      voice: 'en-voice', engine: 'fake', filename: 'silent.wav',
+      silent_clips: 2, silent_indices: [0, 1], voice_matched: true,
+    });
+    render(<MediaTools task={task()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '开始配音' }));
+    expect(await screen.findByText(/有 2 段没有合成出声音/)).toBeInTheDocument();
+  });
+
+  it('目标语言无匹配音色时提示已回落默认音色', async () => {
+    mDub.mockResolvedValue({
+      merged: 'D:/out/x.wav', clips: [], max_drift_seconds: 0, total_seconds: 1,
+      voice: '', engine: 'fake', filename: 'x.wav',
+      silent_clips: 0, voice_matched: false,
+    });
+    render(<MediaTools task={task()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '开始配音' }));
+    expect(await screen.findByText(/未找到与目标语言/)).toBeInTheDocument();
+  });
+
+  it('正常配音不显示任何警告', async () => {
+    mDub.mockResolvedValue({
+      merged: 'D:/out/ok.wav', clips: [], max_drift_seconds: 0.1, total_seconds: 3.5,
+      voice: 'voice-a', engine: 'fake', filename: 'ok.wav',
+      silent_clips: 0, voice_matched: true,
+    });
+    render(<MediaTools task={task()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '开始配音' }));
+    await screen.findByText(/已生成 ok.wav/);
+    expect(screen.queryByText(/没有合成出声音/)).toBeNull();
+    expect(screen.queryByText(/未找到与目标语言/)).toBeNull();
+  });
+
   it('没有字幕文本时给出错误而不是静默失败', async () => {
     mSubs.mockResolvedValue({ task_id: 't1', status: 'completed', kind: 'bilingual', file: 'f.srt', segments: [] });
     render(<MediaTools task={task()} />);

@@ -177,3 +177,68 @@ class TestDubEndpoint:
         for _ in range(2):
             assert client.post("/api/tts/dub", headers=auth_headers, json=payload).status_code == 200
         assert len(set(seen)) == 2, "两次配音不应共用同一个默认文件名: %r" % seen
+
+
+class TestDubVoiceMatching:
+    """配音的"音色是否匹配目标语言"与"静音段"必须回传给前端（否则用户拿到全静音音轨）。"""
+
+    class _EnOnlyEngine:
+        name = "fake-en"
+
+        def list_voices(self):
+            return [{"name": "en-voice", "culture": "en-US", "engine": self.name}]
+
+    def _fake_synth(self, silent_clips: int):
+        def fake(segments, out_dir, **kw):
+            os.makedirs(out_dir, exist_ok=True)
+            merged = os.path.join(out_dir, kw.get("merged_name") or "m.wav")
+            with open(merged, "wb") as f:
+                f.write(b"RIFF")
+            return {
+                "merged": merged, "clips": [], "max_drift_seconds": 0.0, "total_seconds": 1.0,
+                "silent_clips": silent_clips, "silent_indices": list(range(silent_clips)),
+            }
+
+        return fake
+
+    def test_voice_matched_false_and_silent_clips_reported(self, client, auth_headers, monkeypatch):
+        import src.api.server as server_mod
+        monkeypatch.setattr(server_mod, "get_tts_engine", lambda: self._EnOnlyEngine())
+        monkeypatch.setattr(server_mod, "synthesize_segments", self._fake_synth(1))
+
+        r = client.post("/api/tts/dub", headers=auth_headers, json={
+            "segments": [{"start": 0.0, "end": 1.0, "text": "你好"}],
+            "language": "zh",          # 只有 en 音色 -> 无法匹配
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["voice_matched"] is False
+        assert body["silent_clips"] == 1
+        assert body["silent_indices"] == [0]
+
+    def test_voice_matched_true_when_language_matches(self, client, auth_headers, monkeypatch):
+        import src.api.server as server_mod
+        monkeypatch.setattr(server_mod, "get_tts_engine", lambda: self._EnOnlyEngine())
+        monkeypatch.setattr(server_mod, "synthesize_segments", self._fake_synth(0))
+
+        r = client.post("/api/tts/dub", headers=auth_headers, json={
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Hello"}],
+            "language": "en",
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["voice_matched"] is True
+        assert body["silent_clips"] == 0
+
+    def test_explicit_voice_never_reports_mismatch(self, client, auth_headers, monkeypatch):
+        import src.api.server as server_mod
+        monkeypatch.setattr(server_mod, "get_tts_engine", lambda: self._EnOnlyEngine())
+        monkeypatch.setattr(server_mod, "synthesize_segments", self._fake_synth(0))
+
+        r = client.post("/api/tts/dub", headers=auth_headers, json={
+            "segments": [{"start": 0.0, "end": 1.0, "text": "你好"}],
+            "language": "zh",
+            "voice": "en-voice",       # 用户显式指定 -> 不算"未匹配"
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["voice_matched"] is True

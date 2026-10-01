@@ -187,6 +187,11 @@ export interface DubResult {
   voice: string;
   engine: string;
   filename: string;
+  /** 合成出来是 0 采样的段落数（>0 表示音色可能不支持字幕语言） */
+  silent_clips?: number;
+  silent_indices?: number[];
+  /** 目标语言是否有匹配音色；false 表示回落到默认音色 */
+  voice_matched?: boolean;
 }
 
 // 翻译设置（术语模式）

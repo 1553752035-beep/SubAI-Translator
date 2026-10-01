@@ -1501,6 +1501,10 @@ async def tts_dub(request: DubRequest, current_user: UserRecord = Depends(get_cu
         raise HTTPException(status_code=503, detail=f"TTS 后端不可用: {e}")
 
     voice = request.voice or voice_for_language(request.language, voices)
+    # 目标语言是否存在匹配音色：没有就会回落到默认音色，可能根本合成不出声音
+    voice_matched = True
+    if not request.voice and request.language:
+        voice_matched = voice is not None
     workdir = os.path.join(ensure_output_dir(), "dub_" + uuid.uuid4().hex[:8])
     segments = [s.model_dump() for s in request.segments]
     # 默认文件名带随机后缀：否则多次配音会互相覆盖同一个 dub_merged.wav
@@ -1529,7 +1533,14 @@ async def tts_dub(request: DubRequest, current_user: UserRecord = Depends(get_cu
         result["merged"] = dst
         result["filename"] = filename
 
-    return {**result, "voice": voice, "engine": engine.name}
+    silent = int(result.get("silent_clips", 0) or 0)
+    if silent or not voice_matched:
+        logger.warning(
+            "配音可能为静音: language=%s voice=%s voice_matched=%s silent_clips=%d",
+            request.language, voice, voice_matched, silent,
+        )
+
+    return {**result, "voice": voice, "engine": engine.name, "voice_matched": voice_matched}
 
 
 # --------------------------------------------------------------------------- #

@@ -47,7 +47,14 @@ export const MediaTools = ({ task }: Props) => {
   const [voice, setVoice] = useState('');
   const [rate, setRate] = useState(0);
   const [textFrom, setTextFrom] = useState<'translation' | 'source'>('translation');
-  const [dub, setDub] = useState<{ filename: string; seconds: number; drift: number; voice: string } | null>(null);
+  const [dub, setDub] = useState<{
+    filename: string;
+    seconds: number;
+    drift: number;
+    voice: string;
+    silent: number;
+    matched: boolean;
+  } | null>(null);
 
   useEffect(() => {
     setSubPath((prev) => (subs.includes(prev) ? prev : subs[0] ?? ''));
@@ -123,7 +130,14 @@ export const MediaTools = ({ task }: Props) => {
         rate,
         language: task.target_lang || undefined,
       });
-      setDub({ filename: r.filename, seconds: r.total_seconds, drift: r.max_drift_seconds, voice: r.voice });
+      setDub({
+        filename: r.filename,
+        seconds: r.total_seconds,
+        drift: r.max_drift_seconds,
+        voice: r.voice,
+        silent: r.silent_clips ?? 0,
+        matched: r.voice_matched !== false,
+      });
       return r.filename;
     });
 
@@ -219,6 +233,16 @@ export const MediaTools = ({ task }: Props) => {
           <div style={{ marginTop: '10px', fontSize: '13px' }}>
             已生成 {dub.filename}（音色 {dub.voice || '默认'}，总时长 {dub.seconds}s，最大同步偏差 {dub.drift}s）
             <button className="btn" style={{ marginLeft: '8px' }} onClick={() => void downloadOutput(dub.filename)}>下载</button>
+          </div>
+        )}
+        {dub && dub.silent > 0 && (
+          <div style={{ marginTop: '6px', fontSize: '13px', color: '#ff9800' }}>
+            ⚠️ 有 {dub.silent} 段没有合成出声音——通常是所选音色不支持字幕语言。请换一个音色后重试。
+          </div>
+        )}
+        {dub && dub.silent === 0 && !dub.matched && (
+          <div style={{ marginTop: '6px', fontSize: '13px', color: '#ff9800' }}>
+            ⚠️ 未找到与目标语言（{task.target_lang}）匹配的音色，已回落到默认音色，可能出现静音。
           </div>
         )}
       </div>
