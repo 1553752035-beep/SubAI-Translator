@@ -1,5 +1,8 @@
 # SubAI Translator
 
+[![CI](https://github.com/1553752035-beep/SubAI-Translator/actions/workflows/ci.yml/badge.svg)](https://github.com/1553752035-beep/SubAI-Translator/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/1553752035-beep/SubAI-Translator)](https://github.com/1553752035-beep/SubAI-Translator/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 AI 视频字幕识别与翻译工具：自动提取视频里的语音或硬字幕，用大语言模型翻译成目标语言，一键生成双语字幕文件。
 
 ## 它能做什么
