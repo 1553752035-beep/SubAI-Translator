@@ -22,6 +22,8 @@ import type {
   PluginInfo,
   PluginListResponse,
   PluginMarketplaceEntry,
+  LanguageStats,
+  LanguageDetectResult,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -334,4 +336,33 @@ export const getPluginMarketplace = async (
 ): Promise<{ entries: PluginMarketplaceEntry[]; note: string }> => {
   const response = await api.get("/plugins/marketplace", { params: { query, kind } });
   return response.data as { entries: PluginMarketplaceEntry[]; note: string };
+};
+
+// --------------------------------------------------------------------------- //
+// 四期 4.4 / 4.5 / 4.6：语言、开放平台、报表
+// --------------------------------------------------------------------------- //
+
+export const getLanguages = async (): Promise<{ languages: any[]; stats: LanguageStats }> => {
+  const response = await api.get("/languages");
+  return response.data as { languages: any[]; stats: LanguageStats };
+};
+
+export const detectLanguage = async (text: string): Promise<LanguageDetectResult> => {
+  const response = await api.post("/languages/detect", { text });
+  return response.data as LanguageDetectResult;
+};
+
+export const getOpenApiStats = async (): Promise<any> => {
+  const response = await api.get("/openapi/stats");
+  return response.data;
+};
+
+export const downloadReport = async (format: string, kind = "summary"): Promise<void> => {
+  const response = await api.get("/analytics/export", { params: { format, kind }, responseType: "blob" });
+  const url = URL.createObjectURL(response.data as Blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "subai-" + kind + "." + format;
+  link.click();
+  URL.revokeObjectURL(url);
 };

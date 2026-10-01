@@ -253,3 +253,17 @@ export interface PluginMarketplaceEntry {
   installed: boolean;
   builtin?: boolean;
 }
+
+export interface LanguageStats {
+  total: number;
+  asr: number;
+  translate: number;
+  tts: number;
+}
+
+export interface LanguageDetectResult {
+  code: string;
+  confidence: number;
+  method: string;
+  candidates: { code: string; score: number }[];
+}

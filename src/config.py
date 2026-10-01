@@ -143,6 +143,7 @@ class PathConfig(BaseModel):
     uploads_dir: str = Field(default_factory=lambda: os.path.join("{root}", "data", "uploads"))
     plugins_dir: str = Field(default_factory=lambda: os.path.join("{root}", "plugins"))
     plugins_state: str = Field(default_factory=lambda: os.path.join("{root}", "data", "plugins.json"))
+    openapi_db: str = Field(default_factory=lambda: os.path.join("{root}", "data", "openapi.db"))
     
     def resolve(self, value: str) -> str:
         """解析路径，替换{root}占位符"""
@@ -316,6 +317,19 @@ class MonitoringConfig(BaseSettings):
     alert_latency_seconds: float = Field(default=5.0, description="请求 P99 延迟告警阈值（秒）")
 
 
+class OpenAPIConfig(BaseSettings):
+    """开放平台配置（四期 4.5）：API 密钥与 Webhook。"""
+    model_config = SettingsConfigDict(env_prefix="SUBAI_OPENAPI_")
+
+    enabled: bool = Field(default=True, description="是否启用开放平台（密钥与 Webhook）")
+    key_prefix: str = Field(default="subai_", description="API 密钥前缀（便于识别与日志脱敏）")
+    key_bytes: int = Field(default=24, description="密钥随机字节数")
+    webhook_max_attempts: int = Field(default=4, description="Webhook 最大投递次数（含首次）")
+    webhook_timeout: float = Field(default=10.0, description="单次 Webhook 请求超时（秒）")
+    webhook_backoff: float = Field(default=1.0, description="退避基数（秒），第 n 次重试等待 n*backoff")
+    webhook_max_deliveries: int = Field(default=500, description="每个 Webhook 保留的投递记录上限")
+
+
 class PluginConfig(BaseSettings):
     """插件系统配置（四期 4.3）"""
     model_config = SettingsConfigDict(env_prefix="SUBAI_PLUGIN_")
@@ -356,6 +370,7 @@ class SubAIConfig(BaseSettings):
     backup: BackupConfig = Field(default_factory=BackupConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
+    openapi: OpenAPIConfig = Field(default_factory=OpenAPIConfig)
     
     # 字幕切分阈值
     max_chars: int = Field(default=20, description="每行最大字符数")

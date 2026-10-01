@@ -9,12 +9,17 @@ import {
   getLlmStatus,
   getQueueStats,
   getTranslationSettings,
+  getLanguages,
+  detectLanguage,
+  getOpenApiStats,
+  downloadReport,
   setLlmMode,
   setTermMode,
   testLlm,
 } from '../api';
 import type {
   AsrDeviceInfo,
+  LanguageStats,
   CacheStats,
   LlmStatus,
   QueueStats,
@@ -43,6 +48,10 @@ export function SettingsPage() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [langStats, setLangStats] = useState<LanguageStats | null>(null);
+  const [detectText, setDetectText] = useState('');
+  const [detectResult, setDetectResult] = useState('');
+  const [openStats, setOpenStats] = useState<any>(null);
   const [testResult, setTestResult] = useState<any>(null);
 
   const [cloudUrl, setCloudUrl] = useState('');
@@ -75,6 +84,43 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // 四期 4.4 / 4.5：语言支持与开放平台概览（接口不可用时不影响页面其它部分）
+  useEffect(() => {
+    (async () => {
+      try {
+        const langs = await getLanguages();
+        setLangStats(langs.stats);
+      } catch {
+        /* 旧后端无该接口时保持占位符即可 */
+      }
+      try {
+        setOpenStats(await getOpenApiStats());
+      } catch {
+        /* 同上 */
+      }
+    })();
+  }, []);
+
+  const doDetect = async () => {
+    setDetectResult("");
+    try {
+      const r = await detectLanguage(detectText);
+      setDetectResult(r.code
+        ? ("检测结果：" + r.code + "（置信度 " + String(Math.round(r.confidence * 100)) + "%，方法 " + r.method + "）")
+        : "无法判定该文本的语言");
+    } catch {
+      setDetectResult("检测失败");
+    }
+  };
+
+  const doExport = async (format: string) => {
+    try {
+      await downloadReport(format);
+    } catch {
+      setDetectResult("报表导出失败");
+    }
+  };
 
   const switchTermMode = async (mode: string) => {
     setBusy(true);
@@ -241,6 +287,46 @@ export function SettingsPage() {
               强制锁定：术语译名 100% 一致（占位符替换后再还原），术语作定语时句式可能略生硬。<br />
               软提示：把命中的术语作为"必须使用"的要求交给模型，语句更自然，但不保证逐字一致。<br />
               两种模式下，命中术语的字幕行都不会使用翻译缓存（术语改动后必须重译）。
+            </div>
+          </div>
+        </div>
+
+        <div className="table-card">
+          <div className="table-head"><div className="t">语言与报表（四期）</div></div>
+          <div className="set-body">
+            <Row
+              label="支持语言"
+              value={langStats
+                ? (String(langStats.total) + ' 种（识别 ' + String(langStats.asr) + ' · 翻译 '
+                   + String(langStats.translate) + ' · 配音 ' + String(langStats.tts) + '）')
+                : '-'}
+            />
+            <div className="set-actions">
+              <input
+                className="auth-input"
+                placeholder="输入一段文本，检测它的语言"
+                value={detectText}
+                onChange={(e) => setDetectText(e.target.value)}
+              />
+              <button className="btn" disabled={!detectText} onClick={() => void doDetect()}>检测语言</button>
+            </div>
+            {detectResult && <div className="auth-msg ok">{detectResult}</div>}
+            <Row
+              label="开放平台"
+              value={openStats
+                ? ('密钥 ' + String(openStats.keys?.keys ?? 0) + ' 个 · 调用 '
+                   + String(openStats.keys?.calls ?? 0) + ' 次 · 回调 '
+                   + String(openStats.webhooks?.deliveries ?? 0) + ' 次（成功率 '
+                   + String(Math.round((openStats.webhooks?.success_rate ?? 1) * 100)) + '%）')
+                : '-'}
+            />
+            <div className="set-actions">
+              <button className="btn" onClick={() => void doExport('xlsx')}>导出统计 Excel</button>
+              <button className="btn" onClick={() => void doExport('pdf')}>导出统计 PDF</button>
+              <button className="btn" onClick={() => void doExport('html')}>导出统计 HTML</button>
+            </div>
+            <div className="set-hint">
+              报表数据直接来自任务记录（含翻译行数 / 术语命中 / 缓存命中），因此与任务列表里的数字一致。
             </div>
           </div>
         </div>

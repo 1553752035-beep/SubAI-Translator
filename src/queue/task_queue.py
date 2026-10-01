@@ -305,6 +305,7 @@ class TaskQueue:
             
             queue_task.completed_at = time.time()
             logger.info(f"任务 {task_id} 完成（耗时 {queue_task.completed_at - queue_task.started_at:.1f}s）")
+            await self._notify_webhooks("task.completed", task_id)
             
         except Exception as e:
             # 更新任务状态为failed
@@ -314,6 +315,7 @@ class TaskQueue:
                 error_message=str(e)
             )
             logger.error(f"任务 {task_id} 失败: {e}", exc_info=True)
+            await self._notify_webhooks("task.failed", task_id, error=str(e))
         
         finally:
             # 释放信号量
@@ -321,6 +323,30 @@ class TaskQueue:
             
             # 移除运行中的任务
             self._running_tasks.pop(task_id, None)
+
+    async def _notify_webhooks(self, event: str, task_id: str, error: str = "") -> None:
+        """向订阅方推送任务事件（四期 4.5）。
+
+        事件派发失败**绝不影响任务本身**——这是开放平台的铁律：
+        回调是附加能力，不能把主流程拖下水。
+        """
+        try:
+            from src.openapi.webhook import get_webhook_manager
+
+            task = await self.task_manager.get_task(task_id)
+            payload = {
+                "task_id": task_id,
+                "status": getattr(task, "status", None),
+                "mode": getattr(task, "mode", None),
+                "source_lang": getattr(task, "source_lang", None),
+                "target_lang": getattr(task, "target_lang", None),
+                "result_files": getattr(task, "result_files", None),
+                "error": error or None,
+                "completed_at": getattr(task, "completed_at", None) or time.time(),
+            }
+            await get_webhook_manager().dispatch(event, payload)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Webhook 事件派发失败（不影响任务）: %r", e)
     
     # ----------------------------------------------------------------------- #
     # 状态查询

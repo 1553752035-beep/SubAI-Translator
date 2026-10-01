@@ -39,6 +39,7 @@ if ROOT not in sys.path:
 from src.db.terminology import TerminologyManager
 from src.config import config as _cfg, ensure_cuda_dll_path
 from src.plugins.seams import CapabilityDisabled, ocr_provider
+from src import languages as languages_module
 from src.cancel import raise_if_cancelled
 from src.cache.translation_cache import TranslationCache
 from src.retry import retry, RetryExhausted
@@ -399,6 +400,11 @@ def translate(
     t0 = time.time()
     out: list[str] = [""] * len(texts)
     todo: list[int] = []
+
+    # 目标语言校验（四期 4.4）：不在支持清单里**只提示不阻断**，
+    # 因为用户可能写自定义名称（例如 "Japanese (anime)"），强行拦下反而碍事。
+    if target and languages_module.get(target) is None:
+        log("  [语言] 目标语言 %r 不在支持清单中，将按原样交给模型" % target)
 
     if stats is not None:
         stats.update({"total": len(texts), "terms": 0, "cache_hits": 0, "llm_requests": 0, "failed": 0})

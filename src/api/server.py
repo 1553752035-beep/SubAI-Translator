@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from datetime import datetime
 import logging
 import mimetypes
 import os
@@ -39,7 +41,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -58,6 +60,10 @@ from src.queue.task_queue import TaskQueue, get_task_queue
 from src.compose import burn_hardsub, mux_softsub
 from src.tts import get_engine as get_tts_engine, synthesize_segments, voice_for_language
 from src import llm as llm_module
+from src import languages as languages_module
+from src import analytics as analytics_module
+from src.openapi.keys import ApiKey, get_api_key_manager
+from src.openapi.webhook import EVENTS as WEBHOOK_EVENTS, get_webhook_manager
 from src.plugins import init_plugins
 from src.plugins import registry as plugin_registry
 from src.plugins.manifest import VALID_KINDS as PLUGIN_KINDS
@@ -195,6 +201,32 @@ class DubRequest(BaseModel):
     voice: Optional[str] = None
     rate: int = Field(default=0, ge=-10, le=10)
     output_name: Optional[str] = None
+
+
+class ApiKeyCreateRequest(BaseModel):
+    """创建 API 密钥（四期 4.5）。"""
+    name: str = Field(..., description="密钥名称，便于识别用途")
+    scopes: Optional[list] = Field(default=None, description="权限范围，默认 translate/tasks/languages")
+
+
+class WebhookCreateRequest(BaseModel):
+    """注册 Webhook（四期 4.5）。"""
+    url: str = Field(..., description="回调地址（http/https）")
+    events: Optional[list] = Field(default=None, description="订阅事件，默认全部")
+
+
+class OpenTranslateRequest(BaseModel):
+    """开放 API：翻译请求。"""
+    texts: list = Field(..., description="待翻译文本列表")
+    target: str = Field(..., description="目标语言（代码或名称）")
+    terms: Optional[dict] = Field(default=None, description="术语表 {原文: 译文}")
+    use_cache: bool = Field(default=True, description="是否使用翻译缓存")
+
+
+class LanguageDetectRequest(BaseModel):
+    """语言检测请求（四期 4.4）：单段用 text，多段用 texts（取多数票）。"""
+    text: Optional[str] = Field(default=None, description="待检测文本")
+    texts: Optional[list] = Field(default=None, description="多段文本，取多数票")
 
 
 class LlmTestRequest(BaseModel):
@@ -589,6 +621,16 @@ async def process_transcode_task(
         terms = int(stats.get("terms", 0) or 0)
         cache_hits = int(stats.get("cache_hits", 0) or 0)
 
+        # 四期 4.6：把统计写进任务记录，供数据分析（这些数字此前只出现在日志里）
+        metrics = {
+            "lines_total": total,
+            "lines_failed": failed,
+            "terms_hit": terms,
+            "cache_hits": cache_hits,
+            "llm_requests": int(stats.get("llm_requests", 0) or 0),
+            "files": len(files),
+        }
+
         if total and failed >= total:
             # 翻译整体失败：任务标记失败，但保留识别结果（run_pipeline 已额外输出原文转录）
             await task_manager.update_task(
@@ -598,6 +640,7 @@ async def process_transcode_task(
                 message="翻译全部失败，已保留原文转录",
                 error_message="翻译后端不可用：%d/%d 行翻译失败" % (failed, total),
                 result_files=files,
+                metrics=metrics,
             )
             REGISTRY.inc("subai_task_failed_total")
             logger.error("任务 %s 翻译全部失败（%d/%d）", task_id, failed, total)
@@ -608,6 +651,7 @@ async def process_transcode_task(
                 progress=1.0,
                 message="完成（%d/%d 行未翻译，已保留原文 · 术语命中 %d · 缓存命中 %d）" % (failed, total, terms, cache_hits),
                 result_files=files,
+                metrics=metrics,
             )
             REGISTRY.inc("subai_task_completed_total")
             logger.warning("任务 %s 部分翻译失败（%d/%d）", task_id, failed, total)
@@ -618,6 +662,7 @@ async def process_transcode_task(
                 progress=1.0,
                 message="任务完成（%d 行 · 术语命中 %d · 缓存命中 %d）" % (total, terms, cache_hits),
                 result_files=files,
+                metrics=metrics,
             )
             REGISTRY.inc("subai_task_completed_total")
 
@@ -1725,6 +1770,281 @@ async def admin_alerts(current_user: UserRecord = Depends(get_current_admin)):
         "active": [a.to_dict() for a in alert_manager_obj.active_alerts()],
         "history": [a.to_dict() for a in alert_manager_obj.recent_history(limit=50)],
     }
+
+
+# --------------------------------------------------------------------------- #
+# 数据分析（四期 4.6）
+# --------------------------------------------------------------------------- #
+
+def _tasks_db_path() -> str:
+    return config.paths.resolve(config.paths.tasks_db)
+
+
+@app.get("/api/analytics/summary")
+async def analytics_summary(days: int = 30, current_user: UserRecord = Depends(get_current_user)):
+    """使用统计：任务量、成功率、耗时、翻译量与命中率。"""
+    return await analytics_module.summary(_tasks_db_path(), days=days)
+
+
+@app.get("/api/analytics/quality")
+async def analytics_quality(days: int = 30, current_user: UserRecord = Depends(get_current_user)):
+    """质量分析：成功率、失败原因分布与已知数据缺口（如实留空）。"""
+    return await analytics_module.quality(_tasks_db_path(), days=days)
+
+
+@app.get("/api/analytics/export")
+async def analytics_export(format: str = "xlsx", kind: str = "summary", days: int = 30,
+                           current_user: UserRecord = Depends(get_current_user)):
+    """导出报表：format=xlsx|pdf|html，kind=summary|quality。"""
+    fmt = (format or "xlsx").lower()
+    if fmt not in ("xlsx", "pdf", "html"):
+        raise HTTPException(status_code=400, detail="format 必须是 xlsx / pdf / html")
+    if kind not in ("summary", "quality"):
+        raise HTTPException(status_code=400, detail="kind 必须是 summary / quality")
+    data = await (analytics_module.summary(_tasks_db_path(), days=days)
+                  if kind == "summary" else analytics_module.quality(_tasks_db_path(), days=days))
+    report = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: analytics_module.build_report(kind, data))
+    stamp = datetime.now().strftime("%Y%m%d")
+    filename = "subai-%s-%s.%s" % (kind, stamp, fmt)
+    headers = {"Content-Disposition": 'attachment; filename="%s"' % filename}
+    if fmt == "html":
+        return Response(report["html"], media_type="text/html; charset=utf-8", headers=headers)
+    if fmt == "pdf":
+        return Response(report["pdf"], media_type="application/pdf", headers=headers)
+    return Response(
+        report["xlsx"],
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 开放平台：API 密钥与 Webhook（四期 4.5）
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/openapi/stats")
+async def openapi_stats(current_user: UserRecord = Depends(get_current_user)):
+    """密钥与回调的总体情况（调用次数、成功率）。"""
+    return {
+        "keys": await get_api_key_manager().stats(),
+        "webhooks": await get_webhook_manager().stats(),
+        "events": list(WEBHOOK_EVENTS),
+    }
+
+
+@app.get("/api/openapi/keys")
+async def list_api_keys(current_user: UserRecord = Depends(get_current_admin)):
+    """列出 API 密钥（只显示前缀，永不回显明文）。"""
+    manager = get_api_key_manager()
+    return {"keys": [k.to_dict() for k in await manager.list()], "stats": await manager.stats()}
+
+
+@app.post("/api/openapi/keys")
+async def create_api_key(request: ApiKeyCreateRequest,
+                         current_user: UserRecord = Depends(get_current_admin)):
+    """创建 API 密钥。**明文只在这次响应里出现一次**，请立即保存。"""
+    manager = get_api_key_manager()
+    secret, key = await manager.create(request.name, scopes=request.scopes,
+                                       user_id=current_user.username)
+    await get_webhook_manager().dispatch("key.created", {
+        "key_id": key.key_id, "name": key.name, "created_by": current_user.username,
+    })
+    return {"secret": secret, "key": key.to_dict(), "notice": "密钥明文仅显示这一次，请立即保存"}
+
+
+@app.post("/api/openapi/keys/{key_id}/enable")
+async def enable_api_key(key_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    if not await get_api_key_manager().set_enabled(key_id, True):
+        raise HTTPException(status_code=404, detail="密钥不存在: %s" % key_id)
+    return {"key_id": key_id, "enabled": True}
+
+
+@app.post("/api/openapi/keys/{key_id}/disable")
+async def disable_api_key(key_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    if not await get_api_key_manager().set_enabled(key_id, False):
+        raise HTTPException(status_code=404, detail="密钥不存在: %s" % key_id)
+    return {"key_id": key_id, "enabled": False}
+
+
+@app.delete("/api/openapi/keys/{key_id}")
+async def revoke_api_key(key_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    """吊销密钥（不可恢复）。"""
+    if not await get_api_key_manager().revoke(key_id):
+        raise HTTPException(status_code=404, detail="密钥不存在: %s" % key_id)
+    return {"key_id": key_id, "revoked": True}
+
+
+@app.get("/api/openapi/usage")
+async def openapi_usage(key_id: Optional[str] = None, days: int = 30,
+                        current_user: UserRecord = Depends(get_current_admin)):
+    """按天统计调用量（全局或指定密钥）。"""
+    return {"daily": await get_api_key_manager().daily(key_id=key_id, days=days)}
+
+
+@app.get("/api/openapi/webhooks")
+async def list_webhooks(current_user: UserRecord = Depends(get_current_admin)):
+    manager = get_webhook_manager()
+    return {
+        "webhooks": [w.to_dict() for w in await manager.list()],
+        "stats": await manager.stats(),
+        "events": list(WEBHOOK_EVENTS),
+    }
+
+
+@app.post("/api/openapi/webhooks")
+async def create_webhook(request: WebhookCreateRequest,
+                         current_user: UserRecord = Depends(get_current_admin)):
+    """注册 Webhook；返回的 secret 用于校验回调签名。"""
+    try:
+        hook, secret = await get_webhook_manager().add(request.url, events=request.events)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"webhook": hook.to_dict(reveal_secret=True), "secret": secret,
+            "notice": "请保存 secret 用于校验回调签名（HMAC-SHA256）"}
+
+
+@app.post("/api/openapi/webhooks/{webhook_id}/enable")
+async def enable_webhook(webhook_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    if not await get_webhook_manager().set_enabled(webhook_id, True):
+        raise HTTPException(status_code=404, detail="Webhook 不存在: %s" % webhook_id)
+    return {"webhook_id": webhook_id, "enabled": True}
+
+
+@app.post("/api/openapi/webhooks/{webhook_id}/disable")
+async def disable_webhook(webhook_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    if not await get_webhook_manager().set_enabled(webhook_id, False):
+        raise HTTPException(status_code=404, detail="Webhook 不存在: %s" % webhook_id)
+    return {"webhook_id": webhook_id, "enabled": False}
+
+
+@app.delete("/api/openapi/webhooks/{webhook_id}")
+async def delete_webhook(webhook_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    if not await get_webhook_manager().remove(webhook_id):
+        raise HTTPException(status_code=404, detail="Webhook 不存在: %s" % webhook_id)
+    return {"webhook_id": webhook_id, "deleted": True}
+
+
+@app.post("/api/openapi/webhooks/{webhook_id}/test")
+async def test_webhook(webhook_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    """立即发一条 webhook.test，用于验证地址与签名。"""
+    manager = get_webhook_manager()
+    if await manager.get(webhook_id) is None:
+        raise HTTPException(status_code=404, detail="Webhook 不存在: %s" % webhook_id)
+    ids = await manager.dispatch("webhook.test", {"message": "测试事件", "by": current_user.username},
+                                 background=False)
+    deliveries = [d for d in await manager.deliveries(webhook_id, limit=5) if d["delivery_id"] in ids]
+    return {"webhook_id": webhook_id, "deliveries": deliveries}
+
+
+@app.get("/api/openapi/webhooks/{webhook_id}/deliveries")
+async def webhook_deliveries(webhook_id: str, limit: int = 50,
+                             current_user: UserRecord = Depends(get_current_admin)):
+    """查看投递记录（状态/尝试次数/HTTP 码/错误）。"""
+    return {"deliveries": await get_webhook_manager().deliveries(webhook_id, limit=limit)}
+
+
+# --------------------------------------------------------------------------- #
+# 开放 API（用 API 密钥鉴权，供第三方程序调用）
+# --------------------------------------------------------------------------- #
+
+async def require_api_key(
+    authorization: Optional[str] = Header(default=None),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> ApiKey:
+    """API 密钥鉴权：支持 Authorization: Bearer <key> 或 X-API-Key。"""
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    elif x_api_key:
+        token = x_api_key.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="缺少 API 密钥（Authorization: Bearer 或 X-API-Key）")
+    key = await get_api_key_manager().verify(token)
+    if key is None:
+        raise HTTPException(status_code=401, detail="API 密钥无效或已吊销")
+    return key
+
+
+def _check_scope(key: ApiKey, scope: str) -> None:
+    if key.scopes and scope not in key.scopes:
+        raise HTTPException(status_code=403, detail="该密钥没有 %s 权限（当前: %s）"
+                            % (scope, ",".join(key.scopes)))
+
+
+@app.get("/api/open/v1/me")
+async def open_me(key: ApiKey = Depends(require_api_key)):
+    """当前密钥信息与用量。"""
+    return {"key": key.to_dict(), "events": list(WEBHOOK_EVENTS)}
+
+
+@app.get("/api/open/v1/languages")
+async def open_languages(key: ApiKey = Depends(require_api_key)):
+    """语言清单（开放 API 版）。"""
+    await get_api_key_manager().record_call(key.key_id, ok=True)
+    return {"languages": [lang.to_dict() for lang in languages_module.LANGUAGES],
+            "stats": languages_module.stats()}
+
+
+@app.post("/api/open/v1/translate")
+async def open_translate(request: OpenTranslateRequest, key: ApiKey = Depends(require_api_key)):
+    """翻译一段文本列表（开放 API 的核心能力）。"""
+    _check_scope(key, "translate")
+    from src.pipeline import translate as translate_lines
+
+    manager = get_api_key_manager()
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: translate_lines(list(request.texts), request.target,
+                                    dict(request.terms or {}), use_cache=request.use_cache),
+        )
+        await manager.record_call(key.key_id, ok=True)
+        return {"translations": result, "target": languages_module.normalize(request.target),
+                "count": len(result)}
+    except Exception as e:  # noqa: BLE001
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=502, detail="翻译失败: %r" % (e,))
+
+
+@app.get("/api/open/v1/tasks/{task_id}")
+async def open_task_status(task_id: str, key: ApiKey = Depends(require_api_key)):
+    """查询任务状态与产物。"""
+    _check_scope(key, "tasks")
+    manager = get_api_key_manager()
+    task = await task_manager.get_task(task_id)
+    if task is None:
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=404, detail="任务不存在: %s" % task_id)
+    await manager.record_call(key.key_id, ok=True)
+    return task.to_dict()
+
+
+# --------------------------------------------------------------------------- #
+# 语言支持（四期 4.4）
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/languages")
+async def list_languages(capability: Optional[str] = None,
+                         current_user: UserRecord = Depends(get_current_user)):
+    """支持的语言与能力矩阵。
+
+    capability 可选 asr / translate / tts，用于只取某类能力的语言。
+    """
+    items = [lang.to_dict() for lang in languages_module.LANGUAGES]
+    if capability:
+        items = [item for item in items if item.get(capability)]
+    return {"languages": items, "stats": languages_module.stats()}
+
+
+@app.post("/api/languages/detect")
+async def detect_language(request: LanguageDetectRequest,
+                          current_user: UserRecord = Depends(get_current_user)):
+    """检测文本语言；传 texts 时按多数票给出整段字幕的语言。"""
+    if request.texts:
+        return languages_module.detect_batch(list(request.texts))
+    return languages_module.detect(request.text or "")
 
 
 # --------------------------------------------------------------------------- #

@@ -31,6 +31,19 @@ import aiosqlite
 # 数据模型
 # --------------------------------------------------------------------------- #
 
+def _parse_metrics(raw) -> dict:
+    """把库里的 metrics JSON 文本解析成 dict；坏数据一律当空字典，绝不抛。"""
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 class TaskRecord:
     """任务记录"""
     def __init__(
@@ -50,7 +63,8 @@ class TaskRecord:
         updated_at: Optional[float] = None,
         completed_at: Optional[float] = None,
         error_message: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        metrics: Optional[dict] = None
     ):
         self.task_id = task_id
         self.video_path = video_path
@@ -68,6 +82,8 @@ class TaskRecord:
         self.completed_at = completed_at
         self.error_message = error_message
         self.user_id = user_id
+        # 四期 4.6：任务指标（翻译行数/术语命中/缓存命中/失败行/请求数等）
+        self.metrics = metrics or {}
     
     def to_dict(self) -> dict:
         """转换为字典（用于API响应）"""
@@ -87,7 +103,8 @@ class TaskRecord:
             "updated_at": datetime.fromtimestamp(self.updated_at).isoformat(),
             "completed_at": datetime.fromtimestamp(self.completed_at).isoformat() if self.completed_at else None,
             "error_message": self.error_message,
-            "user_id": self.user_id
+            "user_id": self.user_id,
+            "metrics": self.metrics
         }
 
 
@@ -148,6 +165,9 @@ class TaskManager:
         columns = [row[1] for row in await cursor.fetchall()]
         if "user_id" not in columns:
             await self._db.execute("ALTER TABLE tasks ADD COLUMN user_id TEXT")
+        # 迁移：旧库无 metrics 列时补齐（四期 4.6 数据分析）
+        if "metrics" not in columns:
+            await self._db.execute("ALTER TABLE tasks ADD COLUMN metrics TEXT DEFAULT '{}'")
         
         # 创建索引（加速查询）
         await self._db.execute("""
@@ -276,7 +296,8 @@ class TaskManager:
         progress: Optional[float] = None,
         message: Optional[str] = None,
         result_files: Optional[list[str]] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        metrics: Optional[dict] = None
     ) -> Optional[TaskRecord]:
         """
         更新任务状态
@@ -310,6 +331,10 @@ class TaskManager:
             set_clauses.append("message = ?")
             values.append(message)
         
+        if metrics is not None:
+            set_clauses.append("metrics = ?")
+            values.append(json.dumps(metrics, ensure_ascii=False))
+
         if result_files is not None:
             set_clauses.append("result_files = ?")
             values.append(json.dumps(result_files, ensure_ascii=False))
@@ -469,7 +494,8 @@ class TaskManager:
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],
             error_message=row["error_message"],
-            user_id=row["user_id"] if "user_id" in row.keys() else None
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
+            metrics=_parse_metrics(row["metrics"]) if "metrics" in row.keys() else None
         )
 
 
