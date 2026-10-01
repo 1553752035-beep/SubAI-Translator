@@ -19,6 +19,9 @@ import type {
   MediaOutput,
   DubResult,
   TranslationSettings,
+  PluginInfo,
+  PluginListResponse,
+  PluginMarketplaceEntry,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -299,4 +302,36 @@ export const getTranslationSettings = async (): Promise<TranslationSettings> => 
 export const setTermMode = async (mode: string): Promise<{ term_mode: string }> => {
   const response = await api.post('/translation/term-mode', { mode });
   return response.data as { term_mode: string };
+};
+// --------------------------------------------------------------------------- //
+// 插件系统（四期 4.3）
+// --------------------------------------------------------------------------- //
+
+export const listPlugins = async (detail = false): Promise<PluginListResponse> => {
+  const response = await api.get("/plugins", { params: { detail } });
+  return response.data as PluginListResponse;
+};
+
+export const setPluginEnabled = async (pluginId: string, enabled: boolean): Promise<PluginInfo> => {
+  const action = enabled ? "enable" : "disable";
+  const response = await api.post("/plugins/" + pluginId + "/" + action);
+  return response.data as PluginInfo;
+};
+
+export const reloadPlugins = async (): Promise<{ discovered: number }> => {
+  const response = await api.post("/plugins/reload");
+  return response.data as { discovered: number };
+};
+
+export const probePlugin = async (pluginId: string) => {
+  const response = await api.post("/plugins/" + pluginId + "/probe", undefined, { timeout: 40000 });
+  return response.data;
+};
+
+export const getPluginMarketplace = async (
+  query?: string,
+  kind?: string,
+): Promise<{ entries: PluginMarketplaceEntry[]; note: string }> => {
+  const response = await api.get("/plugins/marketplace", { params: { query, kind } });
+  return response.data as { entries: PluginMarketplaceEntry[]; note: string };
 };

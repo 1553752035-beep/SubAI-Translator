@@ -252,7 +252,23 @@ class EdgeTTSEngine:
 
 
 def get_engine(name: str = "auto"):
-    """获取 TTS 后端。auto：Windows 用 SAPI，其他平台尝试 edge-tts。"""
+    """获取 TTS 后端。auto：Windows 用 SAPI，其他平台尝试 edge-tts。
+
+    优先通过插件系统取用（内置插件包装的正是下面的实现）：
+    - 对应插件被停用 -> 抛出明确错误，**不偷偷回退**（停用就是停用）；
+    - 插件系统整体关闭 -> 回退内置实现，行为与引入插件系统前完全一致。
+    """
+    from src.plugins import seams
+
+    if name == "sapi" and os.name != "nt":
+        raise RuntimeError("sapi 后端仅支持 Windows")
+    try:
+        engine = seams.tts_engine(name)
+    except seams.CapabilityDisabled as e:
+        raise RuntimeError(str(e))
+    if engine is not None:
+        return engine
+
     if name in ("auto", "sapi"):
         if os.name == "nt":
             return WindowsSapiEngine()

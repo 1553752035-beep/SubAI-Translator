@@ -57,3 +57,7 @@ build_log.txt
 Thumbs.db
 desktop.ini
 *.log
+
+# 插件系统（四期 4.3）：运行时状态与用户插件目录不入库
+data/plugins.json
+/plugins/

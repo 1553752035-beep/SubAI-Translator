@@ -38,6 +38,7 @@ if ROOT not in sys.path:
 
 from src.db.terminology import TerminologyManager
 from src.config import config as _cfg, ensure_cuda_dll_path
+from src.plugins.seams import CapabilityDisabled, ocr_provider
 from src.cancel import raise_if_cancelled
 from src.cache.translation_cache import TranslationCache
 from src.retry import retry, RetryExhausted
@@ -181,7 +182,6 @@ def hardsub_segments(video: str, sample_fps: Optional[float] = None,
                      min_score: Optional[float] = None, gap_tol: Optional[float] = None,
                      progress_callback: Optional[Callable] = None) -> list[dict]:
     import cv2
-    from rapidocr_onnxruntime import RapidOCR
 
     # 未显式传参时回退到 config.ocr 配置（支持环境变量覆盖）
     if sample_fps is None:
@@ -192,7 +192,10 @@ def hardsub_segments(video: str, sample_fps: Optional[float] = None,
         gap_tol = _cfg.ocr.gap_tol
 
     t0 = time.time()
-    engine = RapidOCR()
+    # OCR 引擎由插件系统提供（内置 RapidOCR 插件包装的就是原实现）；
+    # 插件被停用时抛 CapabilityDisabled 并给出可执行的提示。
+    provider = ocr_provider()
+    engine = provider.create_engine()
     log("  [OCR] 引擎加载 %.2fs" % (time.time() - t0))
 
     cap = cv2.VideoCapture(video)
@@ -216,23 +219,10 @@ def hardsub_segments(video: str, sample_fps: Optional[float] = None,
             ok, frame = cap.retrieve()
             if ok:
                 frames += 1
-                res, _ = engine(frame)
+                # 解析逻辑（含 [box, text, score] 的多版本兼容）由 provider 提供
+                parts = provider.texts_from_frame(engine, frame, min_score)
                 ocr_calls += 1
-                if res:
-                    parts = []
-                    for item in res:
-                        # 兼容不同 RapidOCR 版本的返回格式 [box, text, score]，
-                        # score 可能是 str / float / numpy 标量
-                        try:
-                            _box, _text, _score = item
-                        except (TypeError, ValueError):
-                            continue
-                        try:
-                            _score = float(_score)
-                        except (TypeError, ValueError):
-                            _score = 0.0
-                        if _score >= min_score and _text and str(_text).strip():
-                            parts.append(str(_text))
+                if parts:
                     text = " ".join(parts).strip()
                     if text:
                         raw.append((idx / fps, _norm(text)))

@@ -5,6 +5,7 @@ import { SubtitleEditor } from './components/SubtitleEditor';
 import { TasksPage } from './pages/TasksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HelpPage } from './pages/HelpPage';
+import { PluginsPage } from './pages/PluginsPage';
 import { TerminologyManager } from './components/TerminologyManager';
 import { startBackend, checkBackendHealth, getSystemInfo } from './api/tauri';
 import type { SystemInfo } from './api/tauri';
@@ -13,7 +14,7 @@ import { LoginPage } from './pages/LoginPage';
 import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth } from './api';
 import type { UserInfo, LlmStatus } from './types';
 
-type TabId = 'home' | 'tasks' | 'terms' | 'settings' | 'help';
+type TabId = 'home' | 'tasks' | 'terms' | 'plugins' | 'settings' | 'help';
 
 const Icon = ({ d }: { d: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -31,6 +32,7 @@ const NAV_ICONS: Record<TabId, ReactNode> = {
       <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
     </svg>
   ),
+  plugins: <Icon d="M9 3v2M15 3v2M6 7h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6zM12 16v5" />,
   help: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="10" />
@@ -43,6 +45,7 @@ const NAV_ITEMS: { id: TabId; label: string }[] = [
   { id: 'home', label: '首页' },
   { id: 'tasks', label: '任务列表' },
   { id: 'terms', label: '术语库管理' },
+  { id: 'plugins', label: '插件' },
   { id: 'settings', label: '设置' },
   { id: 'help', label: '使用帮助' },
 ];
@@ -335,6 +338,7 @@ export default function App() {
           )}
           {activeTab === 'settings' && <SettingsPage />}
           {activeTab === 'help' && <HelpPage />}
+      {activeTab === 'plugins' && <PluginsPage />}
         </div>
       </div>
 

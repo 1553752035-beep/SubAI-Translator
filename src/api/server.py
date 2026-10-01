@@ -58,6 +58,9 @@ from src.queue.task_queue import TaskQueue, get_task_queue
 from src.compose import burn_hardsub, mux_softsub
 from src.tts import get_engine as get_tts_engine, synthesize_segments, voice_for_language
 from src import llm as llm_module
+from src.plugins import init_plugins
+from src.plugins import registry as plugin_registry
+from src.plugins.manifest import VALID_KINDS as PLUGIN_KINDS
 from src.subtitles import load_task_segments, save_task_segments
 from src.logging_config import setup_logging
 from src.auth.dependencies import get_current_user, get_current_admin
@@ -363,6 +366,13 @@ async def lifespan(app: FastAPI):
     if config.monitoring.enabled and config.monitoring.alert_check_interval_seconds > 0:
         alert_loop_task = asyncio.create_task(_alert_loop())
         logger.info(f"告警巡检已启动，间隔={config.monitoring.alert_check_interval_seconds}秒")
+
+    # 初始化插件系统（四期 4.3）：失败不影响主流程
+    try:
+        plugin_count = init_plugins()
+        logger.info(f"插件系统已初始化，发现 {plugin_count} 个插件")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"插件系统初始化失败（不影响主流程）: {e!r}")
 
     logger.info("API服务启动完成")
     
@@ -1715,6 +1725,86 @@ async def admin_alerts(current_user: UserRecord = Depends(get_current_admin)):
         "active": [a.to_dict() for a in alert_manager_obj.active_alerts()],
         "history": [a.to_dict() for a in alert_manager_obj.recent_history(limit=50)],
     }
+
+
+# --------------------------------------------------------------------------- #
+# 插件系统（四期 4.3）
+# --------------------------------------------------------------------------- #
+
+def _require_plugin(plugin_id: str):
+    """取插件记录，不存在则 404（避免把 KeyError 变成 500）。"""
+    record = plugin_registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="插件不存在: %s" % plugin_id)
+    return record
+
+
+@app.get("/api/plugins")
+async def list_plugins(kind: Optional[str] = None, detail: bool = False,
+                       current_user: UserRecord = Depends(get_current_user)):
+    """列出插件与状态；detail=true 时附带能力列表与可用性探测。"""
+    return {
+        "plugins": plugin_registry.list(kind=kind, detail=detail),
+        "stats": plugin_registry.stats(),
+        "kinds": list(PLUGIN_KINDS),
+    }
+
+
+@app.get("/api/plugins/marketplace")
+async def plugin_marketplace(query: Optional[str] = None, kind: Optional[str] = None,
+                             current_user: UserRecord = Depends(get_current_user)):
+    """插件目录（本地索引，不联网）。"""
+    return {
+        "entries": plugin_registry.marketplace(query=query, kind=kind),
+        "note": "目录来自本地索引；远端安装/更新尚未实现，避免假装能联网下载",
+    }
+
+
+@app.get("/api/plugins/{plugin_id}")
+async def get_plugin(plugin_id: str, current_user: UserRecord = Depends(get_current_user)):
+    """单个插件详情（含能力与可用性）。"""
+    return _require_plugin(plugin_id).to_dict(detail=True)
+
+
+@app.post("/api/plugins/reload")
+async def reload_plugins(current_user: UserRecord = Depends(get_current_admin)):
+    """重新扫描插件目录（仅管理员）。"""
+    count = plugin_registry.reload()
+    return {"discovered": count, "stats": plugin_registry.stats()}
+
+
+@app.post("/api/plugins/{plugin_id}/enable")
+async def enable_plugin(plugin_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    """启用插件（仅管理员）；状态持久化到 data/plugins.json。"""
+    record = _require_plugin(plugin_id)
+    ok = plugin_registry.set_enabled(plugin_id, True)
+    if not ok and record.error:
+        raise HTTPException(status_code=400, detail="插件存在错误，无法启用: %s" % record.error)
+    return record.to_dict(detail=True)
+
+
+@app.post("/api/plugins/{plugin_id}/disable")
+async def disable_plugin(plugin_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    """停用插件（仅管理员）。停用即停用：对应能力会真的不可用。"""
+    record = _require_plugin(plugin_id)
+    plugin_registry.set_enabled(plugin_id, False)
+    return record.to_dict(detail=True)
+
+
+@app.post("/api/plugins/{plugin_id}/probe")
+async def probe_plugin(plugin_id: str, current_user: UserRecord = Depends(get_current_admin)):
+    """对插件做一次真实探测（如翻译插件的端点连通性）。"""
+    record = _require_plugin(plugin_id)
+    if not record.enabled or not record.loaded or record.instance is None:
+        raise HTTPException(status_code=400, detail="插件未启用或未加载，无法探测")
+    probe = getattr(record.instance, "probe", None)
+    if not callable(probe):
+        return {"plugin_id": plugin_id, "supported": False,
+                "detail": "该插件不支持探测"}
+    try:
+        return {"plugin_id": plugin_id, "supported": True, "result": probe()}
+    except Exception as e:  # noqa: BLE001
+        return {"plugin_id": plugin_id, "supported": True, "error": repr(e)}
 
 
 # --------------------------------------------------------------------------- #

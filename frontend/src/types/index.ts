@@ -205,3 +205,51 @@ export interface TranslationSettings {
   term_mode: string;
   available: TranslationOption[];
 }
+
+// --------------------------------------------------------------------------- //
+// 插件系统（四期 4.3）
+// --------------------------------------------------------------------------- //
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  kind: string;
+  version: string;
+  description: string;
+  author: string;
+  builtin: boolean;
+  external: boolean;
+  enabled: boolean;
+  loaded: boolean;
+  /** enabled | pending | disabled | error */
+  state: string;
+  error: string;
+  priority?: number;
+  capabilities?: string[];
+  available?: boolean;
+}
+
+export interface PluginStats {
+  total: number;
+  enabled: number;
+  errors: number;
+  by_kind: Record<string, { total: number; enabled: number }>;
+}
+
+export interface PluginListResponse {
+  plugins: PluginInfo[];
+  stats: PluginStats;
+  kinds: string[];
+}
+
+export interface PluginMarketplaceEntry {
+  id: string;
+  name: string;
+  kind: string;
+  version: string;
+  description: string;
+  author: string;
+  rating: number | null;
+  installed: boolean;
+  builtin?: boolean;
+}

@@ -141,6 +141,8 @@ class PathConfig(BaseModel):
     terminology_db: str = Field(default_factory=lambda: os.path.join("{root}", "data", "terminology.db"))
     tasks_db: str = Field(default_factory=lambda: os.path.join("{root}", "data", "tasks.db"))
     uploads_dir: str = Field(default_factory=lambda: os.path.join("{root}", "data", "uploads"))
+    plugins_dir: str = Field(default_factory=lambda: os.path.join("{root}", "plugins"))
+    plugins_state: str = Field(default_factory=lambda: os.path.join("{root}", "data", "plugins.json"))
     
     def resolve(self, value: str) -> str:
         """解析路径，替换{root}占位符"""
@@ -314,6 +316,16 @@ class MonitoringConfig(BaseSettings):
     alert_latency_seconds: float = Field(default=5.0, description="请求 P99 延迟告警阈值（秒）")
 
 
+class PluginConfig(BaseSettings):
+    """插件系统配置（四期 4.3）"""
+    model_config = SettingsConfigDict(env_prefix="SUBAI_PLUGIN_")
+
+    enabled: bool = Field(default=True, description="是否启用插件系统")
+    autoload: bool = Field(default=True, description="启动时自动加载已启用的插件")
+    dir: str = Field(default="", description="外部插件目录（留空用 <root>/plugins）")
+    allow_external: bool = Field(default=True, description="是否允许加载外部插件（其代码会被执行）")
+
+
 class SubAIConfig(BaseSettings):
     """主配置类
 
@@ -343,12 +355,18 @@ class SubAIConfig(BaseSettings):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    plugins: PluginConfig = Field(default_factory=PluginConfig)
     
     # 字幕切分阈值
     max_chars: int = Field(default=20, description="每行最大字符数")
     max_dur: float = Field(default=6.0, description="每行最大时长（秒）")
     break_punct: str = Field(default="。！？!?…；;，,、", description="断句标点")
     
+    @property
+    def plugins_dir(self) -> str:
+        """插件目录：SUBAI_PLUGIN_DIR 优先，否则 <root>/plugins。"""
+        return self.paths.resolve(self.plugins.dir or self.paths.plugins_dir)
+
     @property
     def models_dir(self) -> str:
         return self.paths.resolve(self.paths.models_dir)
