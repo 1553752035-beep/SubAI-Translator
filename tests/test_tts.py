@@ -133,16 +133,35 @@ class TestDubTrack:
 # SAPI 端到端（仅 Windows）
 # --------------------------------------------------------------------------- #
 
-def _sapi_available() -> bool:
+def _available_voices() -> list:
     if not IS_WINDOWS:
-        return False
+        return []
     try:
-        return len(WindowsSapiEngine().list_voices()) > 0
-    except Exception:
-        return False
+        return WindowsSapiEngine().list_voices()
+    except Exception:  # noqa: BLE001
+        return []
 
 
-requires_sapi = pytest.mark.skipif(not _sapi_available(), reason="无可用 Windows SAPI 音色")
+VOICES = _available_voices()
+requires_sapi = pytest.mark.skipif(not VOICES, reason="无可用 Windows SAPI 音色")
+
+# 测试文本必须与可用音色匹配。
+# 背景（CI 实测）：GitHub 的 windows runner 通常只装英文音色，让它读中文会合成出
+# 「有文件头、没有采样」的 0 秒音频，于是"时长 > 0.1s"这类断言误报失败。
+# 这里显式挑选一个存在的音色，并让文本与它同语言，使用例在任何 Windows 机器上都成立。
+_HAS_ZH = any("zh" in str(v.get("culture", "")).lower() for v in VOICES)
+SAPI_VOICE = next(
+    (v["name"] for v in VOICES if _HAS_ZH and "zh" in str(v.get("culture", "")).lower()),
+    VOICES[0]["name"] if VOICES else None,
+)
+SAPI_TEXT = "你好" if _HAS_ZH else "Hello"
+SAPI_SEGMENTS = (
+    [{"start": 0.0, "end": 1.2, "text": "第一句测试"},
+     {"start": 1.4, "end": 3.0, "text": "第二句测试"}]
+    if _HAS_ZH else
+    [{"start": 0.0, "end": 1.2, "text": "First line"},
+     {"start": 1.4, "end": 3.0, "text": "Second line"}]
+)
 
 
 @requires_sapi
@@ -150,17 +169,13 @@ class TestSapiEndToEnd:
     def test_synthesize_short_text(self, tmp_path):
         engine = get_engine("sapi")
         out = str(tmp_path / "one.wav")
-        engine.synthesize("你好", out)
+        engine.synthesize(SAPI_TEXT, out, voice=SAPI_VOICE)
         assert os.path.getsize(out) > 0
         assert wav_duration(out) > 0.1
 
     def test_synthesize_segments_aligned(self, tmp_path):
-        segments = [
-            {"start": 0.0, "end": 1.2, "text": "第一句测试"},
-            {"start": 1.4, "end": 3.0, "text": "第二句测试"},
-        ]
-        result = synthesize_segments(segments, str(tmp_path), engine=get_engine("sapi"),
-                                     voice=None, fit_slot=True)
+        result = synthesize_segments(SAPI_SEGMENTS, str(tmp_path), engine=get_engine("sapi"),
+                                     voice=SAPI_VOICE, fit_slot=True)
         assert os.path.exists(result["merged"])
         assert len(result["clips"]) == 2
         # 验收目标：配音与字幕时间同步误差 <= 0.5s
