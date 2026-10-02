@@ -236,8 +236,14 @@ $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "C:\Users\Administrator\.tauri\suba
 npm run tauri:build -- --bundles nsis --config src-tauri/tauri.release.conf.json
 ```
 
-会额外产出 `.nsis.zip` 与其 `.sig` 签名文件。把它们与安装包一起上传到 Release，
-并按下面格式写一个 `latest.json` 一起上传（`signature` 填 `.sig` 文件的内容）：
+会额外产出安装包的**签名文件** `...-setup.exe.sig`。
+
+> **重要（实测结论）**：Tauri v2 的 NSIS 更新产物**就是安装包本身 + 它的签名**，不做额外打包 ——
+> 依据 tauri-bundler 源码 `bundle.rs`：注释为 "Targets the v2 updater plugin installs directly, no wrapping needed"。
+> 也就是说**同一个 `.exe` 既是安装包、也是更新包**，不要再去找 `.nsis.zip`。
+> 另外签名只针对**文件内容**，所以资产改名（例如改成无空格的 `SubAI-Translator-Setup-4.1.0-lite.exe`）不影响验签。
+
+把「安装包 + `latest.json`」上传到 Release（`signature` 填 `.sig` 文件的内容，`url` 指向安装包资产名）：
 
 ```json
 {
@@ -247,7 +253,7 @@ npm run tauri:build -- --bundles nsis --config src-tauri/tauri.release.conf.json
   "platforms": {
     "windows-x86_64": {
       "signature": "<.sig 文件内容>",
-      "url": "https://github.com/1553752035-beep/SubAI-Translator/releases/download/v4.1.0/SubAI Translator_4.1.0_x64-setup.nsis.zip"
+      "url": "https://github.com/1553752035-beep/SubAI-Translator/releases/download/v4.1.0/SubAI-Translator-Setup-4.1.0-lite.exe"
     }
   }
 }
@@ -291,3 +297,20 @@ curl.exe -sL -o (Join-Path $dllDir "nsis_tauri_utils.dll") "https://gh-proxy.com
 ```
 
 > 日常（不带更新产物）就用 10.1 的命令。CI 里可把私钥放进 GitHub Secret 再按上面的方式导出。
+
+### 10.5 v4.1.0 发布清单（实测）
+
+发布目录：`D:\SubAI-Translator\release\`
+
+| 文件 | 大小 | 用途 |
+|---|---|---|
+| `SubAI-Translator-Setup-4.1.0-lite.exe` | 231.45 MB | **安装包 + 更新包（同一文件）** |
+| `latest.json` | <1 KB | 自动更新的版本清单（内嵌签名）|
+| `SubAI-Translator-Setup-4.1.0-lite.exe.sig` | 428 B | 签名文件（可选上传，便于核对）|
+| `RELEASE-NOTES-4.1.0.md` | <1 KB | Release 描述文本 |
+
+安装包 SHA256：`C42628FB4E04B0992E560EDFBBA009C048B080687FEF3955D0FED8D95EDA02D9`
+
+自动更新链路：应用请求 `https://github.com/1553752035-beep/SubAI-Translator/releases/latest/download/latest.json`
+→ 按 `windows-x86_64.url` 下载安装包 → 用内嵌 `signature` 与内置公钥验签 → 通过后静默安装并重启。
+**前提**：该 Release 必须是「最新且非预发布」，否则 `releases/latest` 不会指向它。
