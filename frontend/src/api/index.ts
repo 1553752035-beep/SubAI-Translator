@@ -213,6 +213,12 @@ export const openInExplorer = async (path: string): Promise<void> => {
   await invoke('open_in_explorer', { path });
 };
 
+/** 五期：云端翻译服务商预设（含"去哪里拿 Key"的链接） */
+export const getLlmProviders = async (): Promise<{ providers: any[] }> => {
+  const response = await api.get('/llm/providers');
+  return response.data;
+};
+
 export const getTaskStatus = async (taskId: string): Promise<TaskRecord> => {
   const response = await api.get(`/task/${taskId}`);
   return response.data as TaskRecord;

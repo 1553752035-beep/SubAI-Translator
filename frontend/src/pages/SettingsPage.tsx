@@ -12,6 +12,7 @@ import {
   getLanguages,
   detectLanguage,
   getOpenApiStats,
+  getLlmProviders,
   downloadReport,
   setLlmMode,
   setTermMode,
@@ -52,6 +53,9 @@ export function SettingsPage() {
   const [detectText, setDetectText] = useState('');
   const [detectResult, setDetectResult] = useState('');
   const [openStats, setOpenStats] = useState<any>(null);
+  // 五期：服务商预设（选一家就自动带出地址与模型，小白只需填 Key）
+  const [providers, setProviders] = useState<any[]>([]);
+  const [providerId, setProviderId] = useState('');
   const [updateMsg, setUpdateMsg] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<any>(null);
@@ -89,6 +93,18 @@ export function SettingsPage() {
   useEffect(() => { void load(); }, [load]);
 
   // 四期 4.4 / 4.5：语言支持与开放平台概览（接口不可用时不影响页面其它部分）
+  // 五期：加载服务商预设（失败不影响页面其它部分）
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await getLlmProviders();
+        setProviders(data.providers || []);
+      } catch {
+        /* 旧后端没有这个接口时保持空列表 */
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -283,6 +299,46 @@ export function SettingsPage() {
             <Row label="云端 Key" value={llm ? (llm.cloud.has_key ? '已配置' : '未配置') : '-'} />
 
             <div className="set-form">
+              <select
+                className="auth-input"
+                value={providerId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setProviderId(id);
+                  const p = providers.find((x) => x.id === id);
+                  if (p) {
+                    setCloudUrl(p.base_url);
+                    setCloudModel(p.models?.[0] || '');
+                  }
+                }}
+              >
+                <option value="">选择服务商（不会填就选这个）</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {providerId && (() => {
+                const p = providers.find((x) => x.id === providerId);
+                if (!p) return null;
+                return (
+                  <div className="set-hint" style={{ marginTop: 0 }}>
+                    还没 Key？<a href={p.key_url} target="_blank" rel="noreferrer">点这里获取 {p.name} 的 API Key</a>
+                    {p.note ? '　·　' + p.note : ''}
+                  </div>
+                );
+              })()}
+              {providerId && (providers.find((x) => x.id === providerId)?.models?.length > 0) && (
+                <select
+                  className="auth-input"
+                  value={cloudModel}
+                  onChange={(e) => setCloudModel(e.target.value)}
+                >
+                  {providers.find((x) => x.id === providerId).models.map((m: string) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value={cloudModel}>其他（用下面的输入框自己填）</option>
+                </select>
+              )}
               <input className="auth-input" placeholder="云端 API 地址（OpenAI 兼容）" value={cloudUrl} onChange={(e) => setCloudUrl(e.target.value)} />
               <input className="auth-input" placeholder="云端模型名（如 gpt-4o）" value={cloudModel} onChange={(e) => setCloudModel(e.target.value)} />
               <input className="auth-input" type="password" placeholder="云端 API Key（仅提交给后端，不回显）" value={cloudKey} onChange={(e) => setCloudKey(e.target.value)} />

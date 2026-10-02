@@ -17,6 +17,7 @@ vi.mock('../api', () => ({
   setTermMode: vi.fn(),
   testLlm: vi.fn(),
   getLanguages: vi.fn(),
+  getLlmProviders: vi.fn(),
   detectLanguage: vi.fn(),
   getOpenApiStats: vi.fn(),
   downloadReport: vi.fn(),
@@ -30,6 +31,7 @@ import {
   getCacheStats,
   getCurrentUser,
   getLanguages,
+  getLlmProviders,
   getLlmStatus,
   getOpenApiStats,
   getQueueStats,
@@ -70,6 +72,12 @@ beforeEach(() => {
     languages: [],
     stats: { total: 72, asr: 44, translate: 72, tts: 35 },
   });
+  vi.mocked(getLlmProviders).mockResolvedValue({
+    providers: [
+      { id: 'deepseek', name: 'DeepSeek 深度求索', base_url: 'https://api.deepseek.com/v1',
+        models: ['deepseek-chat'], key_url: 'https://platform.deepseek.com/api_keys', note: '推荐 chat' },
+    ],
+  } as any);
   vi.mocked(getOpenApiStats).mockResolvedValue({
     keys: { keys: 2, calls: 10 },
     webhooks: { deliveries: 5, success_rate: 1 },
