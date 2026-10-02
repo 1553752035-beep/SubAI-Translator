@@ -56,6 +56,7 @@ export function SettingsPage() {
   // 五期：服务商预设（选一家就自动带出地址与模型，小白只需填 Key）
   const [providers, setProviders] = useState<any[]>([]);
   const [providerId, setProviderId] = useState('');
+  const [providersError, setProvidersError] = useState('');
   const [updateMsg, setUpdateMsg] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<any>(null);
@@ -100,7 +101,8 @@ export function SettingsPage() {
         const data = await getLlmProviders();
         setProviders(data.providers || []);
       } catch {
-        /* 旧后端没有这个接口时保持空列表 */
+        // 五期：不要静默失败——之前后端版本旧时这里悄悄空列表，让人以为"没有服务商"
+        setProvidersError('服务商列表加载失败：后端可能不是最新版本（请更新 subai-backend.exe）');
       }
     })();
   }, []);
@@ -317,6 +319,9 @@ export function SettingsPage() {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+              {providersError && (
+                <div className="set-hint" style={{ color: "#ff9b9b" }}>{providersError}</div>
+              )}
               {providerId && (() => {
                 const p = providers.find((x) => x.id === providerId);
                 if (!p) return null;
