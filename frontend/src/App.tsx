@@ -320,8 +320,6 @@ export default function App() {
           ))}
           <div className="divider" />
 
-          <div className="mode-card">
-          </div>
         </div>
 
         <div className="content">

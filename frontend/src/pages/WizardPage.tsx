@@ -326,6 +326,7 @@ export function WizardPage({
           <div>
             <h2 className="w-h2" style={{ textAlign: 'center' }}>好了！</h2>
             <div className="w-sub" style={{ textAlign: 'center' }}>原视频没动过，成品是另一个文件。</div>
+            {message && <div className="w-sub" style={{ textAlign: 'center' }}>{message}</div>}
             <div className="w-out">
               {outputs.length === 0 && '（没有生成成品文件）'}
               {outputs.map((p) => <div key={p}>{p.split(/[\\/]/).pop()}</div>)}

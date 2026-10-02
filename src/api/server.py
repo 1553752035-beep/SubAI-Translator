@@ -903,7 +903,17 @@ async def process_transcode_task(
                 task_id=task_id,
                 status="completed",
                 progress=1.0,
-                message="任务完成（%d 行 · 术语命中 %d · 缓存命中 %d）" % (total, terms, cache_hits),
+                # 五期：带上本次累计的云端 token（本地模式为 0，读不到不影响任务）
+                _tok = ""
+                try:
+                    from src.pipeline import get_token_usage, reset_token_usage
+                    _u = get_token_usage()
+                    if _u.get("total"):
+                        _tok = " · 云端 token %d（输入 %d / 输出 %d）" % (_u["total"], _u["prompt"], _u["completion"])
+                    reset_token_usage()
+                except Exception:  # noqa: BLE001
+                    pass
+                message="任务完成（%d 行 · 术语命中 %d · 缓存命中 %d）%s" % (total, terms, cache_hits, _tok),
                 result_files=files,
                 metrics=metrics,
             )
