@@ -31,6 +31,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [rendering, setRendering] = useState(false);
   const [msg, setMsg] = useState('');
   const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
   const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -127,6 +128,15 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     let d = Infinity;
     for (const w of ws) { const dd = Math.abs(w - t); if (dd < d) { d = dd; best = w; } }
     return { at: best, dist: d };
+  };
+
+  /** 把鼠标横坐标换算成时间（含词边界吸附） */
+  const moveAt = (el: HTMLDivElement, clientX: number, r: Row) => {
+    const box = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+    const raw = r.start + ratio * Math.max(0.01, r.end - r.start);
+    const w = nearestWord(r, raw);
+    setSplitting((prev) => (prev ? { ...prev, at: w.dist < 0.18 ? w.at : raw } : prev));
   };
 
   /** 在编辑态按 Ctrl+Enter：以光标处为意图，切点默认吸附到最近的词边界 */
@@ -296,12 +306,19 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
                     </div>
                     <div
                       className="w-sp-track"
-                      onClick={(e) => {
-                        const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                        const ratio = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-                        const raw = r.start + ratio * Math.max(0.01, r.end - r.start);
-                        const w = nearestWord(r, raw);
-                        setSplitting({ ...splitting, at: w.dist < 0.18 ? w.at : raw });
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+                        setDragging(true);
+                        moveAt(e.currentTarget as HTMLDivElement, e.clientX, r);
+                      }}
+                      onPointerMove={(e) => {
+                        if (!dragging) return;
+                        moveAt(e.currentTarget as HTMLDivElement, e.clientX, r);
+                      }}
+                      onPointerUp={(e) => {
+                        setDragging(false);
+                        try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId); } catch { /* 忽略 */ }
                       }}
                     >
                       <div className="w-sp-base" />
