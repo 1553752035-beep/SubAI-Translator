@@ -16,6 +16,7 @@ fn main() {
             commands::get_help_info,
             commands::get_local_token,
             commands::open_in_explorer,
+            commands::open_external,
         ])
         // 五期：把本机令牌注入网页（window.__SUBAI_LOCAL_TOKEN__）。
         // 不走 invoke：invoke 在某些环境会挂住，页面上就永远"正在连接"。

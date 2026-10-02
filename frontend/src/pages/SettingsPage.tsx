@@ -13,6 +13,7 @@ import {
   detectLanguage,
   getOpenApiStats,
   getLlmProviders,
+  openExternal,
   downloadReport,
   setLlmMode,
   setTermMode,
@@ -327,7 +328,7 @@ export function SettingsPage() {
                 if (!p) return null;
                 return (
                   <div className="set-hint" style={{ marginTop: 0 }}>
-                    还没 Key？<a href={p.key_url} target="_blank" rel="noreferrer">点这里获取 {p.name} 的 API Key</a>
+                    还没 Key？<button className="btn" style={{ padding: '2px 8px', margin: '0 4px' }} onClick={() => void openExternal(p.key_url)}>点这里获取 {p.name} 的 API Key</button>
                     {p.note ? '　·　' + p.note : ''}
                   </div>
                 );
@@ -349,9 +350,17 @@ export function SettingsPage() {
               <input className="auth-input" type="password" placeholder="云端 API Key（仅提交给后端，不回显）" value={cloudKey} onChange={(e) => setCloudKey(e.target.value)} />
             </div>
             <div className="set-actions">
-              <button className="btn" disabled={busy} onClick={() => void switchMode('local')}>使用本地模型</button>
-              <button className="btn" disabled={busy} onClick={() => void switchMode('cloud')}>使用云端 API</button>
-              <button className="btn" disabled={busy} onClick={() => void switchMode('hybrid')}>混合模式</button>
+              {/* 五期：服务商列表已含本地方案，三个模式按钮合并为一个「保存并使用」 */}
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  const sel = providers.find((x) => x.id === providerId);
+                  void switchMode(sel && sel.group === '本地' ? 'local' : 'cloud');
+                }}
+              >
+                保存并使用
+              </button>
               <button className="btn" disabled={testing} onClick={() => void runTest()}>
                 {testing ? '测试中…' : '测试连接'}
               </button>

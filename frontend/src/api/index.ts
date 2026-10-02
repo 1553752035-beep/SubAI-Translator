@@ -207,6 +207,12 @@ export const submitComposeTask = async (
   return response.data;
 };
 
+/** 五期：用系统浏览器打开链接（Tauri 里 a[target=_blank] 不会跳转） */
+export const openExternal = async (url: string): Promise<void> => {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('open_external', { url });
+};
+
 /** 五期：在资源管理器里定位成品文件 */
 export const openInExplorer = async (path: string): Promise<void> => {
   const { invoke } = await import('@tauri-apps/api/core');
