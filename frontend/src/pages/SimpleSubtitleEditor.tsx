@@ -3,6 +3,14 @@ import { getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
 import type { SubtitleSegment } from '../types';
 import '../styles/wizard.css';
 
+type Row = { id: string; start: number; end: number; source: string; translation: string; words?: number[] };
+
+/** 撤销动作：只记动作与稳定 id，不记行号索引——用户先拆后删再撤销也不会错位 */
+type Act =
+  | { kind: 'edit'; id: string; before: string; after: string }
+  | { kind: 'merge'; ids: string[]; before: [Row, Row]; after: Row }
+  | { kind: 'split'; id: string; before: Row; after: [Row, Row] };
+
 const mmss = (t: number): string => {
   const s = Math.max(0, Math.floor(t || 0));
   const m = Math.floor(s / 60);
@@ -10,32 +18,19 @@ const mmss = (t: number): string => {
   return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
 };
 
-type Snap = { i: number; text: string; dirty: boolean; rows?: SubtitleSegment[] };
+let seq = 0;
+const newId = (): string => 'r' + (++seq).toString(36) + Date.now().toString(36).slice(-4);
 
-/** 五期：可疑行判断（后端暂未提供置信度，先用可算的启发式）
- *  规则：空文本 / 极短却占很久 / 每秒字数异常 / 疑似外文或纯数字
- */
-const suspectOf = (s: SubtitleSegment): string => {
-  const t = (s.translation || s.source || '').trim();
-  if (!t) return '空';
-  const dur = Math.max(0, (s.end || 0) - (s.start || 0));
-  const cjk = (t.match(/[\u4e00-\u9fff]/g) || []).length;
-  if (cjk > 0 && cjk <= 2 && dur >= 1.5) return '可能漏字';
-  if (cjk >= 1 && dur / cjk >= 1.2) return '语速异常';
-  if (!/[\u4e00-\u9fff]/.test(t) && /[A-Za-z]{3,}/.test(t)) return '疑似外文';
-  if (/^\d{1,3}$/.test(t)) return '疑似数字';
-  return '';
-};
 export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
-  const [segments, setSegments] = useState<SubtitleSegment[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [cur, setCur] = useState(0);
   const [editing, setEditing] = useState(-1);
   const [draft, setDraft] = useState('');
-  const [dirty, setDirty] = useState<Record<number, boolean>>({});
+  const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [msg, setMsg] = useState('');
-  const historyRef = useRef<Snap[]>([]);
+  const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -44,7 +39,20 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     (async () => {
       try {
         const data = await getTaskSubtitles(taskId);
-        if (!cancelled) { setSegments(data.segments || []); setMsg(''); setDirty({}); historyRef.current = []; setCur(0); }
+        if (cancelled) return;
+        const list: Row[] = (data.segments || []).map((s: SubtitleSegment) => ({
+          id: newId(),
+          start: s.start,
+          end: s.end,
+          source: s.source || '',
+          translation: s.translation || '',
+          words: (s as SubtitleSegment & { words?: number[] }).words,
+        }));
+        setRows(list);
+        setDirty({});
+        stackRef.current = [];
+        setCur(0);
+        setMsg('');
       } catch {
         if (!cancelled) setMsg('读取字幕失败（任务可能还没产出字幕）');
       }
@@ -54,69 +62,87 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
 
   useEffect(() => { if (editing >= 0 && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, [editing]);
 
-  const textOf = (s: SubtitleSegment): string => s.translation || s.source || '';
+  const textOf = (r: Row): string => r.translation || r.source || '';
   const dirtyCount = Object.values(dirty).filter(Boolean).length;
-  const suspectCount = segments.filter((x) => !!suspectOf(x)).length;
+
+  const suspectOf = (r: Row): string => {
+    const t = textOf(r).trim();
+    if (!t) return '空';
+    const dur = Math.max(0, (r.end || 0) - (r.start || 0));
+    const cjk = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+    if (cjk > 0 && cjk <= 2 && dur >= 1.5) return '可能漏字';
+    if (cjk >= 1 && dur / cjk >= 1.2) return '语速异常';
+    if (!/[\u4e00-\u9fff]/.test(t) && /[A-Za-z]{3,}/.test(t)) return '疑似外文';
+    if (/^\d{1,3}$/.test(t)) return '疑似数字';
+    return '';
+  };
+  const suspectCount = rows.filter((r) => !!suspectOf(r)).length;
+
+  const pushAct = (a: Act) => { stackRef.current.push(a); };
 
   const startEdit = (i: number) => {
-    if (i < 0 || i >= segments.length) return;
+    if (i < 0 || i >= rows.length) return;
     setCur(i);
-    setDraft(textOf(segments[i]));
+    setDraft(textOf(rows[i]));
     setEditing(i);
   };
 
   const commit = () => {
     if (editing < 0) return;
-    const i = editing;
-    const before = textOf(segments[i]);
-    const v = draft;
-    if (v !== before) {
-      historyRef.current.push({ i, text: before, dirty: !!dirty[i], rows: undefined });
-      setSegments((prev) => prev.map((s, idx) => (idx === i ? { ...s, translation: v } : s)));
-      setDirty((d) => ({ ...d, [i]: true }));
+    const r = rows[editing];
+    const before = textOf(r);
+    if (draft !== before) {
+      pushAct({ kind: 'edit', id: r.id, before, after: draft });
+      setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, translation: draft } : x)));
+      setDirty((d) => ({ ...d, [r.id]: true }));
     }
     setEditing(-1);
   };
 
-  const cancel = () => { setEditing(-1); };
-
-  /** 五期：断句修正——把相邻两行并成一行（时间取并集，文字相接） */
   const mergeRows = (i: number, dir: 'up' | 'down') => {
     const j = dir === 'up' ? i - 1 : i + 1;
-    if (j < 0 || j >= segments.length) { setMsg('已经到头了'); return; }
-    const a = dir === 'up' ? segments[j] : segments[i];
-    const b = dir === 'up' ? segments[i] : segments[j];
-    const merged: SubtitleSegment = {
-      ...a,
+    if (j < 0 || j >= rows.length) { setMsg('已经到头了'); return; }
+    const a = dir === 'up' ? rows[j] : rows[i];
+    const b = dir === 'up' ? rows[i] : rows[j];
+    const merged: Row = {
+      id: a.id,
+      start: a.start,
       end: b.end,
       source: (a.source || '') + (b.source || ''),
-      translation: (a.translation || a.source || '') + (b.translation || b.source || ''),
+      translation: textOf(a) + textOf(b),
+      words: [...(a.words || [a.start]), ...(b.words || [b.end])],
     };
-    historyRef.current.push({ i, text: textOf(segments[i]), dirty: !!dirty[i], rows: segments.map((x) => ({ ...x })) });   // 撤销用（带整表快照）
-    setSegments((prev) => {
-      const next = [...prev];
-      next.splice(j, 2, merged);
-      return next;
-    });
-    setDirty((d) => { const n = { ...d }; delete n[i]; n[j] = true; return n; });
+    pushAct({ kind: 'merge', ids: [a.id, b.id], before: [a, b], after: merged });
+    setRows((prev) => { const next = [...prev]; next.splice(j, 2, merged); return next; });
+    setDirty((d) => { const n = { ...d }; delete n[a.id]; delete n[b.id]; n[merged.id] = true; return n; });
     setCur(j);
-    setMsg('已合并两行（Ctrl+Z 可撤销这一步）');
+    setMsg('已合并两行（Ctrl+Z 可撤销）');
   };
 
   const undo = () => {
-    const last = historyRef.current.pop();
-    if (!last) { setMsg('没有可撤销的修改'); return; }
-    if (last.rows) {
-      setSegments(last.rows);
-      setCur(last.i);
-      setMsg('已撤销上一步（含合并）');
-      setTimeout(() => setMsg(''), 2000);
-      return;
+    const a = stackRef.current.pop();
+    if (!a) { setMsg('没有可撤销的操作'); return; }
+    if (a.kind === 'edit') {
+      setRows((prev) => prev.map((x) => (x.id === a.id ? { ...x, translation: a.before } : x)));
+      setDirty((d) => ({ ...d, [a.id]: false }));
+      setMsg('已撤销修改');
+    } else if (a.kind === 'merge') {
+      setRows((prev) => {
+        const k = prev.findIndex((x) => x.id === a.after.id);
+        const next = [...prev];
+        if (k >= 0) next.splice(k, 1, a.before[0], a.before[1]); else next.push(a.before[0], a.before[1]);
+        return next;
+      });
+      setMsg('已撤销合并');
+    } else {
+      setRows((prev) => {
+        const k = prev.findIndex((x) => x.id === a.after[0].id || x.id === a.after[1].id);
+        const next = [...prev];
+        if (k >= 0) next.splice(k, Math.min(k + 2, next.length) - k, a.before); else next.push(a.before);
+        return next;
+      });
+      setMsg('已撤销拆分');
     }
-    setSegments((prev) => prev.map((s, idx) => (idx === last.i ? { ...s, translation: last.text } : s)));
-    setDirty((d) => ({ ...d, [last.i]: last.dirty }));
-    setCur(last.i);
-    setMsg('已撤销第 ' + (last.i + 1) + ' 行的修改');
     setTimeout(() => setMsg(''), 2000);
   };
 
@@ -126,13 +152,13 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
       const inInput = tag === 'INPUT' || tag === 'TEXTAREA';
       if (editing >= 0) {
         if (e.key === 'Enter') { e.preventDefault(); commit(); }
-        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        else if (e.key === 'Escape') { e.preventDefault(); setEditing(-1); }
         return;
       }
       if (inInput) return;
       if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setCur((c) => (segments.length ? (c + 1) % segments.length : 0)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setCur((c) => (segments.length ? (c - 1 + segments.length) % segments.length : 0)); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCur((c) => (rows.length ? (c + 1) % rows.length : 0)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setCur((c) => (rows.length ? (c - 1 + rows.length) % rows.length : 0)); }
       else if (e.key === 'Enter') { e.preventDefault(); startEdit(cur); }
     };
     window.addEventListener('keydown', onKey);
@@ -140,15 +166,18 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   });
 
   useEffect(() => {
-    const el = document.getElementById('subrow-' + cur);
+    const r = rows[cur];
+    if (!r) return;
+    const el = document.getElementById('subrow-' + r.id);
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [cur]);
+  }, [cur, rows]);
 
   const save = async (silent = false) => {
     setBusy(true);
     if (!silent) setMsg('');
     try {
-      await saveTaskSubtitles(taskId, segments);
+      const segs: SubtitleSegment[] = rows.map((r) => ({ start: r.start, end: r.end, source: r.source, translation: r.translation }));
+      await saveTaskSubtitles(taskId, segs);
       setMsg('已保存，字幕文件已更新');
       return true;
     } catch (e: any) {
@@ -160,12 +189,12 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   };
 
   const confirmAndRender = async () => {
-    if (suspectCount > 0 && !window.confirm('还有 ' + suspectCount + ' 处可疑字幕没确认，继续生成可能把错字放进视频。\n\n仍然继续吗？（之后仍可改字幕重新出片）')) return;
+    if (suspectCount > 0 && !window.confirm('还有 ' + suspectCount + ' 处可疑字幕没确认，继续生成可能把错字放进视频。\n\n仍然继续吗？')) return;
     setRendering(true);
     setMsg('');
     try {
-      const okSave = await save(true);
-      if (!okSave) return;
+      const ok = await save(true);
+      if (!ok) return;
       await renderTaskVideo(taskId);
       setMsg('已开始生成视频，进度请看任务列表');
     } catch (e: any) {
@@ -175,64 +204,41 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     }
   };
 
-  if (segments.length === 0) {
+  if (rows.length === 0) {
     return <div className="w-sub" style={{ marginTop: 18 }}>{msg || '没有可编辑的字幕'}</div>;
   }
 
   return (
     <div style={{ marginTop: 26 }}>
       <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
-      <div className="w-sub">点哪行改哪行；只改文字，时间不用管。{suspectCount > 0 && <>　·　<b style={{ color: 'var(--w-warn, #b7791f)' }}>可疑 {suspectCount} 处</b>（黄底行，建议看一下）</>}</div>
-      <div className="w-sub"><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销　·　鼠标移到行上可「并入上行/下行」修正断句</div>
+      <div className="w-sub">点哪行改哪行。<span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销{suspectCount > 0 && <>　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b></>}</div>
       <div className="w-subs">
-        {segments.map((s, i) => {
+        {rows.map((r, i) => {
           const isCur = i === cur;
-          const sus = suspectOf(s);
           const isEd = i === editing;
+          const sus = suspectOf(r);
           return (
             <div
-              key={i}
-              id={'subrow-' + i}
+              key={r.id}
+              id={'subrow-' + r.id}
               className={'w-subrow' + (isCur ? ' cur' : '') + (sus ? ' suspect' : '')}
               onClick={() => (isEd ? undefined : setCur(i))}
               onDoubleClick={() => startEdit(i)}
             >
-              <div className="w-time">{isCur ? '▶ ' : ''}{mmss(s.start) + ' → ' + mmss(s.end)}</div>
+              <div className="w-time">{isCur ? '▶ ' : ''}{mmss(r.start) + ' → ' + mmss(r.end)}</div>
               <div className="w-text">
                 {isEd ? (
-                  <input
-                    ref={inputRef}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                  <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} onClick={(e) => e.stopPropagation()} />
                 ) : (
-                  <span>{textOf(s)}{sus && <span className="w-suspect">{sus}</span>}</span>
+                  <span>{textOf(r)}{sus && <span className="w-suspect">{sus}</span>}</span>
                 )}
                 {!isEd && (
                   <span className="w-rowacts">
-                    {i > 0 && <span className="w-merge" title="与上一行合并（断句修错）" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'up'); }}>⇧ 并入上行</span>}
-                    {i < segments.length - 1 && <span className="w-merge" title="与下一行合并（断句修错）" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'down'); }}>⇩ 并入下行</span>}
+                    {i > 0 && <span className="w-merge" title="与上一行合并" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'up'); }}>⇧ 并入上行</span>}
+                    {i < rows.length - 1 && <span className="w-merge" title="与下一行合并" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'down'); }}>⇩ 并入下行</span>}
                   </span>
                 )}
-                {dirty[i] && !isEd && <span className="w-changed">已改</span>}
-                {dirty[i] && !isEd && (
-                  <span
-                    className="w-undo"
-                    title="撤销这一行的修改"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const before = historyRef.current.filter((h) => h.i === i).pop();
-                      if (!before) { setMsg('这一行没有可撤销的修改'); return; }
-                      setSegments((prev) => prev.map((x, idx) => (idx === i ? { ...x, translation: before.text } : x)));
-                      historyRef.current = historyRef.current.filter((h) => h !== before);
-                      setDirty((d) => ({ ...d, [i]: before.dirty }));
-                      setMsg('已撤销第 ' + (i + 1) + ' 行的修改');
-                    }}
-                  >
-                    ↩ 撤销
-                  </span>
-                )}
+                {dirty[r.id] && !isEd && <span className="w-changed">已改</span>}
               </div>
             </div>
           );
