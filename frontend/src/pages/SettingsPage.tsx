@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  changePassword,
   checkHealth,
   clearCache,
   getAsrDevice,
@@ -66,8 +65,6 @@ export function SettingsPage() {
   const [cloudUrl, setCloudUrl] = useState('');
   const [cloudModel, setCloudModel] = useState('');
   const [cloudKey, setCloudKey] = useState('');
-  const [oldPw, setOldPw] = useState('');
-  const [newPw, setNewPw] = useState('');
 
   const load = useCallback(async () => {
     setMsg('');
@@ -234,17 +231,6 @@ export function SettingsPage() {
     catch { setMsg('清空缓存失败（需要管理员权限）'); }
   };
 
-  const doChangePassword = async () => {
-    if (newPw.length < 6) { setMsg('新密码至少 6 个字符'); return; }
-    try {
-      await changePassword(oldPw, newPw);
-      setOldPw(''); setNewPw('');
-      setMsg('密码已修改');
-    } catch (err: any) {
-      const detail = err && err.response ? err.response.data.detail : null;
-      setMsg(typeof detail === 'string' ? detail : '修改密码失败');
-    }
-  };
 
   const qs = (health && health.queue_stats) || null;
 
@@ -478,18 +464,6 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="table-card">
-          <div className="table-head"><div className="t">修改密码</div></div>
-          <div className="set-body">
-            <div className="set-form">
-              <input className="auth-input" type="password" placeholder="当前密码" value={oldPw} onChange={(e) => setOldPw(e.target.value)} />
-              <input className="auth-input" type="password" placeholder="新密码（至少 6 位）" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-            </div>
-            <div className="set-actions">
-              <button className="btn primary" disabled={!oldPw || !newPw} onClick={() => void doChangePassword()}>修改密码</button>
-            </div>
-          </div>
-        </div>
       </div>
     </>
   );
