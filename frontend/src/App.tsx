@@ -303,15 +303,6 @@ export default function App() {
         </div>
         <div className="spacer" />
         <div className="user-chip">
-          {activeTab !== 'home' && (
-              <button
-                className="w-btn w-ghost"
-                style={{ marginRight: 10, padding: '5px 12px', fontSize: 13 }}
-                onClick={() => setActiveTab('home')}
-              >
-                ← 返回主界面
-              </button>
-            )}
             
           {requireLogin && user.role === 'admin' && <em>管理员</em>}
           <button
