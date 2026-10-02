@@ -1,6 +1,6 @@
 [package]
 name = "subai-translator"
-version = "4.1.0"
+version = "5.0.0"
 description = "SubAI Translator - AI-powered video subtitle translation tool"
 authors = ["SubAI Team"]
 license = "MIT"

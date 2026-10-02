@@ -1,8 +1,8 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { WizardPage } from './pages/WizardPage';
+import { SimpleSubtitleEditor } from './pages/SimpleSubtitleEditor';
 import { applyTheme, getSavedTheme, saveTheme, systemTheme, type Theme } from './theme';
 import { TaskProgress } from './components/TaskProgress';
-import { SubtitleEditor } from './components/SubtitleEditor';
 import { TasksPage } from './pages/TasksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HelpPage } from './pages/HelpPage';
@@ -58,6 +58,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home');
   // 五期：双主题。首次进入用系统主题兜底，用户可在向导页右上角切换并记住
   const [theme, setTheme] = useState<Theme>(() => getSavedTheme() ?? systemTheme());
+  // 五期：高级功能默认收起来，主界面只留三段式向导
+  const [navOpen, setNavOpen] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
@@ -270,7 +272,8 @@ export default function App() {
       </div>
 
       <div className="main-content">
-        <div className="sidebar">
+        <div className={'sidebar' + (navOpen ? '' : ' w-hidden')}>
+          <button className="w-btn w-ghost" style={{ marginBottom: 10 }} onClick={() => setNavOpen(false)}>收起高级</button>
           {NAV_ITEMS.map((item) => (
             <div
               key={item.id}
@@ -337,11 +340,12 @@ export default function App() {
                 onEditTask={(id) => setActiveTaskId(id)}
                 theme={theme}
                 onToggleTheme={toggleTheme}
+                onOpenAdvanced={() => setNavOpen(true)}
               />
               {activeTaskId && (
                 <>
                   <TaskProgress taskId={activeTaskId} />
-                  <SubtitleEditor taskId={activeTaskId} />
+                  <SimpleSubtitleEditor taskId={activeTaskId} />
                 </>
               )}
             </>

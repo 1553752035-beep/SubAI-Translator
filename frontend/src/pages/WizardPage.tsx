@@ -50,10 +50,12 @@ export function WizardPage({
   onEditTask,
   theme,
   onToggleTheme,
+  onOpenAdvanced,
 }: {
   onEditTask: (taskId: string) => void;
   theme: Theme;
   onToggleTheme: () => void;
+  onOpenAdvanced: () => void;
 }) {
   const [step, setStep] = useState<Step>('pick');
   const [file, setFile] = useState<File | null>(null);
@@ -179,9 +181,12 @@ export function WizardPage({
       <div className="w-wrap">
         <div className="w-top">
           <div className="w-brand">SubAI <i>Translator</i></div>
-          <button className="w-btn w-ghost" onClick={onToggleTheme}>
-            {theme === 'light' ? '切换到深色' : '切换到浅色'}
-          </button>
+          <div style={{ display: 'flex', gap: 9 }}>
+            <button className="w-btn w-ghost" onClick={onToggleTheme}>
+              {theme === 'light' ? '切换到深色' : '切换到浅色'}
+            </button>
+            <button className="w-btn w-ghost" onClick={onOpenAdvanced}>高级 ›</button>
+          </div>
         </div>
 
         {step === 'pick' && (
