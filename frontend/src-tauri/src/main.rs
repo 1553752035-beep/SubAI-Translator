@@ -13,6 +13,7 @@ fn main() {
             commands::get_system_info,
             commands::get_help_info,
             commands::get_local_token,
+            commands::open_in_explorer,
         ])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {

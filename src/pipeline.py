@@ -643,6 +643,15 @@ def write_json(rows: list[dict], path: str, texts: list[str], translated: list[s
 # --------------------------------------------------------------------------- #
 # 主函数
 # --------------------------------------------------------------------------- #
+#: 五期：「不翻译，只识别」的目标语言写法
+NO_TRANSLATE_TARGETS = ("none", "original", "source", "off", "no")
+
+
+def is_no_translate(target_lang: str) -> bool:
+    """目标语言是不是「不翻译、保留原文」。界面上的第 2 个入口就靠它。"""
+    return str(target_lang or "").strip().lower() in NO_TRANSLATE_TARGETS
+
+
 def run_pipeline(
     video: str,
     mode: str = "asr",
@@ -721,11 +730,19 @@ def run_pipeline(
     # 协作式取消检查点：识别完成后
     raise_if_cancelled(should_cancel)
 
-    # 第3步：翻译
-    log("[3/4] 翻译 ...")
+    # 第3步：翻译（五期：支持「不翻译，只识别」——直接输出原文）
     texts = [r["text"] for r in rows]
-    translated = translate(texts, target_lang, terms, progress_callback=progress_callback,
-                           stats=stats, should_cancel=should_cancel)
+    no_translate = is_no_translate(target_lang)
+    if no_translate:
+        log("[3/4] 跳过翻译（按选择只做识别，输出原文）")
+        translated = list(texts)
+        target_lang = "source"        # 产物命名沿用 <stem>.source.srt
+        if stats is not None:
+            stats["total"] = len(texts)   # 让统计里也有行数（不是 0）
+    else:
+        log("[3/4] 翻译 ...")
+        translated = translate(texts, target_lang, terms, progress_callback=progress_callback,
+                               stats=stats, should_cancel=should_cancel)
     
     # 协作式取消检查点：写盘前（取消则不留半成品）
     raise_if_cancelled(should_cancel)
@@ -737,30 +754,27 @@ def run_pipeline(
     
     if output_format == "srt":
         write_srt(rows, os.path.join(out_dir, "%s.%s.srt" % (stem, target_lang)), translated)
-        write_srt(rows, os.path.join(out_dir, "%s.bilingual.srt" % stem),
-                  ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
-        output_files.extend([
-            os.path.join(out_dir, "%s.%s.srt" % (stem, target_lang)),
-            os.path.join(out_dir, "%s.bilingual.srt" % stem)
-        ])
+        output_files.append(os.path.join(out_dir, "%s.%s.srt" % (stem, target_lang)))
+        if not no_translate:
+            write_srt(rows, os.path.join(out_dir, "%s.bilingual.srt" % stem),
+                      ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
+            output_files.append(os.path.join(out_dir, "%s.bilingual.srt" % stem))
     
     elif output_format == "vtt":
         write_vtt(rows, os.path.join(out_dir, "%s.%s.vtt" % (stem, target_lang)), translated)
-        write_vtt(rows, os.path.join(out_dir, "%s.bilingual.vtt" % stem),
-                  ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
-        output_files.extend([
-            os.path.join(out_dir, "%s.%s.vtt" % (stem, target_lang)),
-            os.path.join(out_dir, "%s.bilingual.vtt" % stem)
-        ])
+        output_files.append(os.path.join(out_dir, "%s.%s.vtt" % (stem, target_lang)))
+        if not no_translate:
+            write_vtt(rows, os.path.join(out_dir, "%s.bilingual.vtt" % stem),
+                      ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
+            output_files.append(os.path.join(out_dir, "%s.bilingual.vtt" % stem))
     
     elif output_format == "ass":
         write_ass(rows, os.path.join(out_dir, "%s.%s.ass" % (stem, target_lang)), translated)
-        write_ass(rows, os.path.join(out_dir, "%s.bilingual.ass" % stem),
-                  ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
-        output_files.extend([
-            os.path.join(out_dir, "%s.%s.ass" % (stem, target_lang)),
-            os.path.join(out_dir, "%s.bilingual.ass" % stem)
-        ])
+        output_files.append(os.path.join(out_dir, "%s.%s.ass" % (stem, target_lang)))
+        if not no_translate:
+            write_ass(rows, os.path.join(out_dir, "%s.bilingual.ass" % stem),
+                      ["%s\n%s" % (a, b) for a, b in zip(texts, translated)])
+            output_files.append(os.path.join(out_dir, "%s.bilingual.ass" % stem))
     
     elif output_format == "json":
         write_json(rows, os.path.join(out_dir, "%s.%s.json" % (stem, target_lang)), texts, translated)

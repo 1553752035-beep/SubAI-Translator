@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect, type ReactNode } from 'react';
-import { VideoUpload } from './components/VideoUpload';
+import { useState, useEffect, type ReactNode } from 'react';
+import { WizardPage } from './pages/WizardPage';
+import { applyTheme, getSavedTheme, saveTheme, systemTheme, type Theme } from './theme';
 import { TaskProgress } from './components/TaskProgress';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { TasksPage } from './pages/TasksPage';
@@ -55,11 +56,23 @@ const NAV_ITEMS: { id: TabId; label: string }[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home');
+  // 五期：双主题。首次进入用系统主题兜底，用户可在向导页右上角切换并记住
+  const [theme, setTheme] = useState<Theme>(() => getSavedTheme() ?? systemTheme());
   const [user, setUser] = useState<UserInfo | null>(null);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
   const [llmMsg, setLlmMsg] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const next: Theme = theme === 'light' ? 'dark' : 'light';
+    saveTheme(next);
+    setTheme(next);
+  };
   const [queue, setQueue] = useState({ running: 0, waiting: 0 });
   const [backendOk, setBackendOk] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -181,10 +194,6 @@ export default function App() {
       setTimeout(() => setLlmMsg(''), 5000);
     }
   };
-
-  const handleTaskSubmitted = useCallback((taskId: string) => {
-    setActiveTaskId(taskId);
-  }, []);
 
   // 翻译后端是否真的可用（决定能否提交任务）
   const llmReady = !!llmStatus && (llmStatus.mode === 'local'
@@ -324,13 +333,17 @@ export default function App() {
           )}
           {activeTab === 'home' && (
             <>
-              <div className="page-head">
-                <h1>视频翻译</h1>
-                <div className="sub">支持 mp4 / mkv / avi，单文件 ≤ 2GB</div>
-              </div>
-              <VideoUpload onTaskSubmitted={handleTaskSubmitted} llmReady={llmReady} llmHint={llmHint} />
-              <TaskProgress taskId={activeTaskId} />
-              <SubtitleEditor taskId={activeTaskId} />
+              <WizardPage
+                onEditTask={(id) => setActiveTaskId(id)}
+                theme={theme}
+                onToggleTheme={toggleTheme}
+              />
+              {activeTaskId && (
+                <>
+                  <TaskProgress taskId={activeTaskId} />
+                  <SubtitleEditor taskId={activeTaskId} />
+                </>
+              )}
             </>
           )}
           {activeTab === 'tasks' && <TasksPage />}

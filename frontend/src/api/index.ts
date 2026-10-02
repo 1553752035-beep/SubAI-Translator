@@ -162,6 +162,37 @@ export const uploadVideoFile = async (file: File): Promise<UploadResult> => {
   return response.data as UploadResult;
 };
 
+/** 五期「我有文字稿」：上传视频 + 稿子，自动对齐时间轴 */
+export const submitAlignTask = async (
+  file: File, script: string, outputVideo: string, sourceLang?: string,
+): Promise<{ task_id: string; status: string; lines: number }> => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('script', script);
+  form.append('output_video', outputVideo);
+  if (sourceLang) form.append('source_lang', sourceLang);
+  const response = await api.post('/align', form);
+  return response.data;
+};
+
+/** 五期「我已有字幕文件」：不识别不翻译，直接套上去出片 */
+export const submitComposeTask = async (
+  file: File, subtitle: File, outputVideo: string,
+): Promise<{ task_id: string; status: string }> => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('subtitle', subtitle);
+  form.append('output_video', outputVideo);
+  const response = await api.post('/compose', form);
+  return response.data;
+};
+
+/** 五期：在资源管理器里定位成品文件 */
+export const openInExplorer = async (path: string): Promise<void> => {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('open_in_explorer', { path });
+};
+
 export const getTaskStatus = async (taskId: string): Promise<TaskRecord> => {
   const response = await api.get(`/task/${taskId}`);
   return response.data as TaskRecord;

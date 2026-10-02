@@ -104,6 +104,7 @@ class TranscodeRequest(BaseModel):
     output_format: str = "srt"  # srt/vtt/ass/json
     terms_file: Optional[str] = None  # 术语库文件路径
     priority: str = "medium"  # high/medium/low
+    output_video: str = "soft"  # 五期：完成后成品视频 soft(软字幕MKV)/hard(硬字幕MP4)/both/none
 
 
 class BatchTranscodeItem(BaseModel):
@@ -115,6 +116,7 @@ class BatchTranscodeItem(BaseModel):
     output_format: str = "srt"
     terms_file: Optional[str] = None
     priority: str = "medium"
+    output_video: str = "soft"
 
 
 class BatchTranscodeRequest(BaseModel):
@@ -555,6 +557,196 @@ progress_callback_task_id: str = ""
 
 
 # --------------------------------------------------------------------------- #
+# 五期：任务完成后自动出片
+# --------------------------------------------------------------------------- #
+
+async def _run_compose_task(task_id: str, video_path: str, subtitle_file: Optional[str],
+                            output_video: str) -> None:
+    """五期「我已有字幕文件」：不识别、不翻译，直接把字幕套进视频出片。"""
+    if not subtitle_file or not os.path.isfile(subtitle_file):
+        await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
+                                       error_message="没有找到字幕文件")
+        return
+    await task_manager.update_task(task_id=task_id, progress=0.3, message="正在生成成品视频…")
+    produced = await _produce_video(task_id, video_path, [subtitle_file], "none", output_video)
+    if not produced:
+        await task_manager.update_task(
+            task_id=task_id, status="failed", progress=1.0,
+            error_message="压制失败（请看后端日志）")
+        return
+    await task_manager.update_task(
+        task_id=task_id, status="completed", progress=1.0,
+        result_files=[subtitle_file] + produced,
+        message="完成，成品已生成：%s" % os.path.basename(produced[-1]),
+        metrics={"lines_total": 0, "lines_failed": 0, "terms_hit": 0, "cache_hits": 0,
+                 "llm_requests": 0, "files": len(produced)},
+    )
+    REGISTRY.inc("subai_task_completed_total")
+    logger.info("任务 %s（直接套字幕）完成：%s", task_id, produced[-1])
+
+
+async def _run_align_task(task_id: str, video_path: str, script_file: Optional[str],
+                          source_lang: Optional[str], output_format: str,
+                          output_video: str) -> None:
+    """五期「我有文字稿」：识别语音时间轴 → 把用户稿子对上去 → 落盘 → 可选出片。"""
+    from src import align as align_module
+    from src.pipeline import asr_segments, extract_audio, write_srt
+
+    if not script_file or not os.path.isfile(script_file):
+        await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
+                                       error_message="没有找到文字稿文件")
+        return
+    with open(script_file, "r", encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f.read().split("\n") if ln.strip()]
+    if not lines:
+        await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
+                                       error_message="文字稿是空的")
+        return
+
+    loop = asyncio.get_running_loop()
+    await task_manager.update_task(task_id=task_id, progress=0.1,
+                                   message="正在识别语音时间轴…")
+    wav = await loop.run_in_executor(None, lambda: extract_audio(video_path))
+    rows = await loop.run_in_executor(None, lambda: asr_segments(wav, source_lang))
+
+    await task_manager.update_task(task_id=task_id, progress=0.6, message="正在对齐文字稿…")
+    aligned = align_module.align_script_to_speech(lines, rows)
+    if not aligned:
+        await task_manager.update_task(
+            task_id=task_id, status="failed", progress=1.0,
+            error_message="没有识别到语音，无法对齐（请确认视频里有人说话）")
+        return
+
+    out_dir = os.path.dirname(os.path.abspath(video_path))     # 与源视频同目录
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    fmt = (output_format or "srt").lower()
+    out_path = os.path.join(out_dir, "%s.source.%s" % (stem, fmt if fmt in ("srt", "vtt", "ass") else "srt"))
+    await loop.run_in_executor(None, lambda: write_srt(aligned, out_path, [s["text"] for s in aligned]))
+
+    files = [out_path]
+    await task_manager.update_task(task_id=task_id, progress=0.8, result_files=files,
+                                   message="字幕已生成，正在出片…")
+    produced = await _produce_video(task_id, video_path, files, "none", output_video)
+    files = files + produced
+    stats = align_module.align_stats(aligned)
+    await task_manager.update_task(
+        task_id=task_id, status="completed", progress=1.0, result_files=files,
+        message="完成：对齐 %d 句，时长 %.1f 秒%s" % (
+            stats["count"], stats["span"],
+            ("，成品：" + os.path.basename(produced[-1])) if produced else ""),
+        metrics={"lines_total": stats["count"], "lines_failed": 0, "terms_hit": 0,
+                 "cache_hits": 0, "llm_requests": 0, "files": len(files)},
+    )
+    REGISTRY.inc("subai_task_completed_total")
+    logger.info("任务 %s（文字稿对齐）完成：%d 句", task_id, stats["count"])
+
+
+def _unique_path(path: str) -> str:
+    """不覆盖已有文件：重名时追加 _1、_2…（原视频永远不会被改动）"""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    i = 1
+    while os.path.exists("%s_%d%s" % (base, i, ext)):
+        i += 1
+    return "%s_%d%s" % (base, i, ext)
+
+
+def _pick_subtitle(files: list, target_lang: str) -> str:
+    """从产物里挑出最适合压制的那条字幕。
+
+    流水线的命名规律是 <stem>.<目标语言>.srt / <stem>.bilingual.srt / <stem>.source.srt，
+    所以优先取带目标语言后缀的，其次双语，最后原文。
+    """
+    subs = [str(f) for f in files if str(f).lower().endswith((".srt", ".ass", ".vtt"))]
+    if not subs:
+        return ""
+    tl = (target_lang or "").lower()
+    for ext in (".srt", ".ass"):
+        for f in subs:
+            name = os.path.basename(f).lower()
+            if tl and name.endswith(".%s%s" % (tl, ext)):
+                return f
+    for f in subs:
+        if "bilingual" in os.path.basename(f).lower():
+            return f
+    for f in subs:
+        if "source" in os.path.basename(f).lower():
+            return f
+    return subs[0]
+
+
+def _output_label(target_lang: str) -> str:
+    """成品文件名里的语言标签（中文名优先）。"""
+    code = (target_lang or "").strip()
+    if not code or code.lower() in ("none", "original", "auto"):
+        return "原文"
+    try:
+        lang = languages_module.get(code)
+        # Language 只有 name_en / name_zh，没有 name（取错会永远落到语言代码上）
+        name = None
+        if lang is not None:
+            name = getattr(lang, "name_zh", None) or getattr(lang, "name_en", None)
+        return str(name) if name else code
+    except Exception:  # noqa: BLE001
+        return code
+
+
+async def _produce_video(task_id: str, video_path: str, files: list,
+                         target_lang: str, output_video: str) -> list:
+    """按用户选择把字幕做成成品视频（与源视频同目录，绝不覆盖原文件）。
+
+    返回新增的成品路径列表；任何失败都只记日志，不抛异常（任务本身已成功）。
+    """
+    mode = (output_video or "soft").strip().lower()
+    if mode in ("none", "off", "no", "subtitle_only", ""):
+        return []
+    subtitle = _pick_subtitle(files, target_lang)
+    if not subtitle:
+        logger.warning("任务 %s 没有可用于压制的字幕文件，跳过出片", task_id)
+        return []
+
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    out_dir = os.path.dirname(os.path.abspath(video_path))
+    label = _output_label(target_lang)
+    try:
+        lang_code = languages_module.normalize(target_lang) if target_lang else None
+    except Exception:  # noqa: BLE001
+        lang_code = None
+
+    loop = asyncio.get_running_loop()
+    produced: list = []
+    try:
+        await task_manager.update_task(task_id=task_id, message="正在生成成品视频…")
+    except Exception:  # noqa: BLE001
+        pass
+
+    if mode in ("soft", "both"):
+        try:
+            out = _unique_path(os.path.join(out_dir, "%s_%s.mkv" % (stem, label)))
+            await loop.run_in_executor(None, lambda: mux_softsub(
+                video_path,
+                [{"path": subtitle, "language": lang_code, "title": label, "default": True}],
+                out,
+            ))
+            produced.append(out)
+            logger.info("任务 %s 已生成软字幕成品: %s", task_id, out)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("任务 %s 软字幕封装失败（不影响任务）: %r", task_id, e)
+
+    if mode in ("hard", "both"):
+        try:
+            out = _unique_path(os.path.join(out_dir, "%s_%s.mp4" % (stem, label)))
+            await loop.run_in_executor(None, lambda: burn_hardsub(video_path, subtitle, out))
+            produced.append(out)
+            logger.info("任务 %s 已生成硬字幕成品: %s", task_id, out)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("任务 %s 硬字幕烧录失败（不影响任务）: %r", task_id, e)
+
+    return produced
+
+
+# --------------------------------------------------------------------------- #
 # 任务处理函数
 # --------------------------------------------------------------------------- #
 
@@ -565,7 +757,10 @@ async def process_transcode_task(
     source_lang: Optional[str] = None,
     target_lang: str = "en",
     output_format: str = "srt",
-    terms_file: Optional[str] = None
+    terms_file: Optional[str] = None,
+    output_video: str = "soft",
+    script_file: Optional[str] = None,
+    subtitle_file: Optional[str] = None,
 ) -> None:
     """
     处理转码任务（核心逻辑）
@@ -587,6 +782,17 @@ async def process_transcode_task(
     if task_manager is None:
         raise RuntimeError("任务管理器未初始化")
     
+    # 五期：我已有字幕文件 —— 不识别不翻译，直接套上去出片
+    if str(mode).lower() == "compose":
+        await _run_compose_task(task_id, video_path, subtitle_file, output_video)
+        return
+
+    # 五期：我有文字稿 —— 只识别时间轴，文字用用户的稿子
+    if str(mode).lower() == "align":
+        await _run_align_task(task_id, video_path, script_file, source_lang,
+                              output_format, output_video)
+        return
+
     # 设置全局task_id（供进度回调使用）
     progress_callback_task_id = task_id
 
@@ -664,6 +870,8 @@ async def process_transcode_task(
             "files": len(files),
         }
 
+        produce_ok = False
+
         if total and failed >= total:
             # 翻译整体失败：任务标记失败，但保留识别结果（run_pipeline 已额外输出原文转录）
             await task_manager.update_task(
@@ -686,6 +894,7 @@ async def process_transcode_task(
                 result_files=files,
                 metrics=metrics,
             )
+            produce_ok = True
             REGISTRY.inc("subai_task_completed_total")
             logger.warning("任务 %s 部分翻译失败（%d/%d）", task_id, failed, total)
         else:
@@ -697,7 +906,18 @@ async def process_transcode_task(
                 result_files=files,
                 metrics=metrics,
             )
+            produce_ok = True
             REGISTRY.inc("subai_task_completed_total")
+
+        # 五期：翻译完成后自动出片（软字幕/硬字幕/两者）；失败只告警，绝不影响任务状态
+        if produce_ok:
+            produced = await _produce_video(task_id, video_path, files, target_lang, output_video)
+            if produced:
+                files = list(files) + produced
+                await task_manager.update_task(
+                    task_id=task_id, result_files=files,
+                    message="完成，成品已生成：%s" % os.path.basename(produced[-1]),
+                )
 
         logger.info(f"任务 {task_id} 处理完成，输出文件数: {len(files)}")
         
@@ -848,6 +1068,122 @@ async def change_password(
     return {"message": "密码已修改"}
 
 
+@app.post("/api/compose")
+async def compose_from_subtitle(
+    file: UploadFile = File(..., description="视频文件"),
+    subtitle: UploadFile = File(..., description="字幕文件 srt/vtt/ass"),
+    output_video: str = Form("soft", description="成品 soft|hard|both"),
+    current_user: UserRecord = Depends(get_current_user),
+):
+    """五期「我已有字幕文件」：不识别不翻译，直接套进视频出片。"""
+    sub_name = subtitle.filename or ""
+    sub_ext = Path(sub_name).suffix.lower()
+    if sub_ext not in {".srt", ".vtt", ".ass", ".ssa"}:
+        raise HTTPException(status_code=400, detail="字幕文件格式不支持: %s" % (sub_ext or "未知"))
+    if (output_video or "soft").lower() not in {"soft", "hard", "both"}:
+        raise HTTPException(status_code=400, detail="output_video 只能是 soft/hard/both")
+
+    allowed_exts = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"}
+    video_name = file.filename or ""
+    if Path(video_name).suffix.lower() not in allowed_exts:
+        raise HTTPException(status_code=400, detail="不支持的文件类型: %s" % (Path(video_name).suffix or "未知"))
+
+    uploads_dir = config.uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+    dest = os.path.join(uploads_dir, "%s_%s" % (uuid.uuid4().hex[:12], Path(video_name).name))
+    sub_dest = os.path.join(uploads_dir, "%s_%s" % (uuid.uuid4().hex[:12], Path(sub_name).name))
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+        with open(sub_dest, "wb") as f:
+            while True:
+                chunk = await subtitle.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception:
+        for p in (dest, sub_dest):
+            if os.path.exists(p):
+                os.remove(p)
+        raise HTTPException(status_code=500, detail="文件保存失败")
+    finally:
+        await file.close()
+        await subtitle.close()
+
+    item = SimpleNamespace(
+        video_path=dest, mode="compose", source_lang=None, target_lang="none",
+        output_format="srt", terms_file=None, priority="medium",
+        output_video=output_video, script_file=None, subtitle_file=sub_dest,
+    )
+    result = await _submit_one_transcode(item, current_user)
+    if result.get("error"):
+        raise HTTPException(status_code=503, detail=result["error"])
+    return {"task_id": result["task_id"], "status": result["status"],
+            "video_path": dest, "subtitle_path": sub_dest}
+
+
+@app.post("/api/align")
+async def align_from_script(
+    file: UploadFile = File(..., description="视频文件"),
+    script: str = Form(..., description="一行一句的文字稿"),
+    source_lang: Optional[str] = Form(None, description="源语言（可省略）"),
+    output_format: str = Form("srt", description="字幕格式 srt|vtt|ass"),
+    output_video: str = Form("soft", description="成品 soft|hard|both|none"),
+    current_user: UserRecord = Depends(get_current_user),
+):
+    """五期「我有文字稿」：上传视频 + 粘贴稿子 → 自动对齐时间轴（不翻译）。
+
+    用户不需要碰时间码；对不齐时可以在「改字幕」页微调。
+    """
+    lines = [ln.strip() for ln in (script or "").replace("\r\n", "\n").split("\n") if ln.strip()]
+    if not lines:
+        raise HTTPException(status_code=400, detail="请先粘贴文字稿（一行一句）")
+
+    allowed_exts = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"}
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail="不支持的文件类型: %s" % (ext or "未知"))
+
+    uploads_dir = config.uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+    dest = os.path.join(uploads_dir, "%s_%s" % (uuid.uuid4().hex[:12], Path(filename).name))
+    total = 0
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                f.write(chunk)
+    except Exception:
+        if os.path.exists(dest):
+            os.remove(dest)
+        raise HTTPException(status_code=500, detail="文件保存失败")
+    finally:
+        await file.close()
+
+    script_path = dest + ".script.txt"
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    item = SimpleNamespace(
+        video_path=dest, mode="align", source_lang=source_lang, target_lang="none",
+        output_format=output_format, terms_file=None, priority="medium",
+        output_video=output_video, script_file=script_path,
+    )
+    result = await _submit_one_transcode(item, current_user)
+    if result.get("error"):
+        raise HTTPException(status_code=503, detail=result["error"])
+    return {"task_id": result["task_id"], "status": result["status"],
+            "lines": len(lines), "size_bytes": total, "video_path": dest}
+
+
 @app.post("/api/upload")
 async def upload_video_file(
     file: UploadFile,
@@ -963,7 +1299,10 @@ async def _submit_one_transcode(item, current_user: UserRecord) -> dict:
         source_lang=item.source_lang,
         target_lang=item.target_lang,
         output_format=item.output_format,
-        terms_file=item.terms_file
+        terms_file=item.terms_file,
+        output_video=getattr(item, "output_video", "soft"),
+        script_file=getattr(item, "script_file", None),
+        subtitle_file=getattr(item, "subtitle_file", None),
     )
 
     if not success:
