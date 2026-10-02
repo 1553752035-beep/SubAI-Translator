@@ -106,6 +106,7 @@ class TranscodeRequest(BaseModel):
     terms_file: Optional[str] = None  # 术语库文件路径
     priority: str = "medium"  # high/medium/low
     output_video: str = "soft"  # 五期：完成后成品视频 soft(软字幕MKV)/hard(硬字幕MP4)/both/none
+    defer_render: bool = False
 
 
 class BatchTranscodeItem(BaseModel):
@@ -118,6 +119,7 @@ class BatchTranscodeItem(BaseModel):
     terms_file: Optional[str] = None
     priority: str = "medium"
     output_video: str = "soft"
+    defer_render: bool = False
 
 
 class BatchTranscodeRequest(BaseModel):
@@ -760,6 +762,7 @@ async def process_transcode_task(
     output_format: str = "srt",
     terms_file: Optional[str] = None,
     output_video: str = "soft",
+    defer_render: bool = False,
     script_file: Optional[str] = None,
     subtitle_file: Optional[str] = None,
 ) -> None:
@@ -974,6 +977,35 @@ async def process_transcode_task(
 # --------------------------------------------------------------------------- #
 # API路由
 # --------------------------------------------------------------------------- #
+
+@app.post("/api/task/{task_id}/render")
+async def render_task_video(task_id: str, current_user: UserRecord = Depends(get_current_user)):
+    """五期：两段式的第二段——用户确认字幕后，再生成成品视频。"""
+    task = await task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    def _g(name, default=None):
+        if isinstance(task, dict):
+            return task.get(name, default)
+        return getattr(task, name, default)
+
+    video_path = _g("video_path")
+    files = list(_g("result_files") or [])
+    if not video_path:
+        raise HTTPException(status_code=400, detail="任务缺少视频路径")
+    subs = [f for f in files if str(f).lower().endswith((".srt", ".ass", ".vtt"))]
+    if not subs:
+        raise HTTPException(status_code=400, detail="这个任务还没有字幕文件")
+    produced = await _produce_video(task_id, video_path, subs, _g("target_lang") or "none",
+                                    _g("output_video") or "soft")
+    if not produced:
+        raise HTTPException(status_code=500, detail="压制失败（请看后端日志）")
+    await task_manager.update_task(
+        task_id=task_id, progress=1.0, result_files=files + produced,
+        message="完成，成品已生成：%s" % os.path.basename(produced[-1]))
+    return {"task_id": task_id, "files": produced}
+
 
 @app.get("/api/term-packs")
 async def list_term_packs(current_user: UserRecord = Depends(get_current_user)):
@@ -1335,6 +1367,7 @@ async def _submit_one_transcode(item, current_user: UserRecord) -> dict:
         output_format=item.output_format,
         terms_file=item.terms_file,
         output_video=getattr(item, "output_video", "soft"),
+        defer_render=getattr(item, "defer_render", False),
         script_file=getattr(item, "script_file", None),
         subtitle_file=getattr(item, "subtitle_file", None),
     )
