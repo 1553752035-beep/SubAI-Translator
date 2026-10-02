@@ -394,7 +394,7 @@ export default function App() {
                 onEditTask={(id) => setActiveTaskId(id)}
                 theme={theme}
                 onToggleTheme={toggleTheme}
-                onOpenAdvanced={() => setNavOpen((v) => !v)}  // 开关：再点一次收起
+                onOpenAdvanced={() => setNavOpen((v) => !v)}
               />
               {activeTaskId && (
                 <>
