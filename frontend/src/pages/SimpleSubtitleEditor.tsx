@@ -12,6 +12,20 @@ const mmss = (t: number): string => {
 
 type Snap = { i: number; text: string; dirty: boolean };
 
+/** 五期：可疑行判断（后端暂未提供置信度，先用可算的启发式）
+ *  规则：空文本 / 极短却占很久 / 每秒字数异常 / 疑似外文或纯数字
+ */
+const suspectOf = (s: SubtitleSegment): string => {
+  const t = (s.translation || s.source || '').trim();
+  if (!t) return '空';
+  const dur = Math.max(0, (s.end || 0) - (s.start || 0));
+  const cjk = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (cjk > 0 && cjk <= 2 && dur >= 1.5) return '可能漏字';
+  if (cjk >= 1 && dur / cjk >= 1.2) return '语速异常';
+  if (!/[\u4e00-\u9fff]/.test(t) && /[A-Za-z]{3,}/.test(t)) return '疑似外文';
+  if (/^\d{1,3}$/.test(t)) return '疑似数字';
+  return '';
+};
 export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [segments, setSegments] = useState<SubtitleSegment[]>([]);
   const [cur, setCur] = useState(0);
@@ -42,6 +56,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
 
   const textOf = (s: SubtitleSegment): string => s.translation || s.source || '';
   const dirtyCount = Object.values(dirty).filter(Boolean).length;
+  const suspectCount = segments.filter((x) => !!suspectOf(x)).length;
 
   const startEdit = (i: number) => {
     if (i < 0 || i >= segments.length) return;
@@ -115,6 +130,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   };
 
   const confirmAndRender = async () => {
+    if (suspectCount > 0 && !window.confirm('还有 ' + suspectCount + ' 处可疑字幕没确认，继续生成可能把错字放进视频。\n\n仍然继续吗？（之后仍可改字幕重新出片）')) return;
     setRendering(true);
     setMsg('');
     try {
@@ -136,16 +152,18 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   return (
     <div style={{ marginTop: 26 }}>
       <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
-      <div className="w-sub">点哪行改哪行；只改文字，时间不用管。<span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销</div>
+      <div className="w-sub">点哪行改哪行；只改文字，时间不用管。{suspectCount > 0 && <>　·　<b style={{ color: 'var(--w-warn, #b7791f)' }}>可疑 {suspectCount} 处</b>（黄底行，建议看一下）</>}</div>
+      <div className="w-sub"><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销</div>
       <div className="w-subs">
         {segments.map((s, i) => {
           const isCur = i === cur;
+          const sus = suspectOf(s);
           const isEd = i === editing;
           return (
             <div
               key={i}
               id={'subrow-' + i}
-              className={'w-subrow' + (isCur ? ' cur' : '')}
+              className={'w-subrow' + (isCur ? ' cur' : '') + (sus ? ' suspect' : '')}
               onClick={() => (isEd ? undefined : setCur(i))}
               onDoubleClick={() => startEdit(i)}
             >
@@ -159,7 +177,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span>{textOf(s)}</span>
+                  <span>{textOf(s)}{sus && <span className="w-suspect">{sus}</span>}</span>
                 )}
                 {dirty[i] && !isEd && <span className="w-changed">已改</span>}
                 {dirty[i] && !isEd && (
