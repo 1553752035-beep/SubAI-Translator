@@ -133,6 +133,7 @@ export function WizardPage({
           target_lang: intent === 'translate' ? target : 'none',
           output_format: 'srt',
           output_video: outputVideo,
+          defer_render: true,   // 五期：两段式——先出字幕草稿，确认后再出片
         };
         const r = await submitTranscodeTask(payload);
         newTaskId = r.task_id;

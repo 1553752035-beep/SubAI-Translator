@@ -225,6 +225,11 @@ export const getLlmProviders = async (): Promise<{ providers: any[] }> => {
   return response.data;
 };
 
+/** 五期：两段式第二段——用户确认字幕后，再生成成品视频 */
+export const renderTaskVideo = async (taskId: string): Promise<{ task_id: string; files: string[] }> => {
+  const response = await api.post('/task/' + encodeURIComponent(taskId) + '/render');
+  return response.data;
+};
 export const getTaskStatus = async (taskId: string): Promise<TaskRecord> => {
   const response = await api.get(`/task/${taskId}`);
   return response.data as TaskRecord;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTaskSubtitles, saveTaskSubtitles } from '../api';
+import { getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
 import type { SubtitleSegment } from '../types';
 import '../styles/wizard.css';
 
@@ -15,6 +15,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [editing, setEditing] = useState<number>(-1);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [rendering, setRendering] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,6 +38,20 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
 
   const change = (i: number, v: string) => {
     setSegments((prev) => prev.map((s, idx) => (idx === i ? { ...s, translation: v } : s)));
+  };
+
+  const confirmAndRender = async () => {
+    setRendering(true);
+    setMsg('');
+    try {
+      await saveTaskSubtitles(taskId, segments);          // 先存字幕
+      await renderTaskVideo(taskId);                       // 再出片（这一步才生成视频）
+      setMsg('已开始生成视频，进度请看任务列表');
+    } catch (e: any) {
+      setMsg('生成失败：' + String(e?.response?.data?.detail || e?.message || e));
+    } finally {
+      setRendering(false);
+    }
   };
 
   const save = async () => {
@@ -81,8 +96,10 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
         ))}
       </div>
       <div className="w-center">
-        <button className="w-btn w-primary" disabled={busy} onClick={() => void save()}>
-          {busy ? '保存中…' : '保存字幕'}</button>
+        <button className="w-btn w-primary" disabled={busy || rendering} onClick={() => void confirmAndRender()}>
+          {rendering ? '正在生成视频…' : '确认无误，生成视频'}</button>
+        <button className="w-btn w-ghost" disabled={busy || rendering} onClick={() => void save()}>
+          {busy ? '保存中…' : '只保存字幕'}</button>
       </div>
       {msg && <div className="w-msg">{msg}</div>}
     </div>
