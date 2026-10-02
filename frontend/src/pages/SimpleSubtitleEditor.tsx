@@ -256,7 +256,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   return (
     <div style={{ marginTop: 26 }}>
       <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
-      <div className="w-sub">点哪行改哪行。<span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销{suspectCount > 0 && <>　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b></>}</div>
+      <div className="w-sub">点哪行改哪行。<span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销　·　编辑时 <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Enter</span> 在此处拆分{suspectCount > 0 && <>　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b></>}</div>
       <div className="w-subs">
         {rows.map((r, i) => {
           const isCur = i === cur;
@@ -288,6 +288,49 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
                 )}
                 {dirty[r.id] && !isEd && <span className="w-changed">已改</span>}
               </div>
+                {splitting && splitting.id === r.id && (
+                  <div className="w-splitpanel">
+                    <div className="w-sp-bar">
+                      <div className="w-sp-chip"><b>{textOf(r).slice(0, splitting.pos) || '（空）'}</b><em>{(splitting.at - r.start).toFixed(1)}s</em></div>
+                      <div className="w-sp-chip"><b>{textOf(r).slice(splitting.pos) || '（空）'}</b><em>{(r.end - splitting.at).toFixed(1)}s</em></div>
+                    </div>
+                    <div
+                      className="w-sp-track"
+                      onClick={(e) => {
+                        const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                        const ratio = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+                        const raw = r.start + ratio * Math.max(0.01, r.end - r.start);
+                        const w = nearestWord(r, raw);
+                        setSplitting({ ...splitting, at: w.dist < 0.18 ? w.at : raw });
+                      }}
+                    >
+                      <div className="w-sp-base" />
+                      <div className="w-sp-fill" style={{ width: (((splitting.at - r.start) / Math.max(0.01, r.end - r.start)) * 100) + '%' }} />
+                      {((r.words && r.words.length >= 2) ? r.words : [r.start, r.end]).map((w, k) => (
+                        <span key={k} className={'w-sp-tick' + (nearestWord(r, splitting.at).dist < 0.18 && Math.abs(w - nearestWord(r, splitting.at).at) < 1e-6 ? ' hit' : '')} style={{ left: (((w - r.start) / Math.max(0.01, r.end - r.start)) * 100) + '%' }} />
+                      ))}
+                      <span className={'w-sp-cursor' + (nearestWord(r, splitting.at).dist < 0.18 ? ' snapped' : '')} style={{ left: (((splitting.at - r.start) / Math.max(0.01, r.end - r.start)) * 100) + '%' }} />
+                      {nearestWord(r, splitting.at).dist < 0.18 && <span className="w-sp-snap" style={{ left: (((splitting.at - r.start) / Math.max(0.01, r.end - r.start)) * 100) + '%' }}>已吸附: {splitting.at.toFixed(1)}s</span>}
+                    </div>
+                    <div className="w-sp-hint">
+                      <span>拖动可微调 · 虚线圆点是词边界，靠近会自动吸附</span>
+                      <span>{nearestWord(r, splitting.at).dist < 0.18 ? '已吸附到词边界 ✓' : '自由位置（未吸附）'}</span>
+                    </div>
+                    {r.end - splitting.at < 0.5 && <div className="w-sp-warn">⚠ 第二句只有 {(r.end - splitting.at).toFixed(1)}s，不足 0.5 秒，可能听不清</div>}
+                    <div className="w-sp-acts">
+                      <button className="w-btn w-ghost" onClick={(ev) => { ev.stopPropagation(); setSplitting(null); setMsg('已取消拆分'); }}>取消</button>
+                      <button
+                        className="w-btn w-primary"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          const right = r.end - splitting.at;
+                          if (right < 0.5 && !window.confirm('第二句只有 ' + right.toFixed(1) + 's，不足 0.5 秒，烧录后可能一闪而过。\n\n仍然拆分吗？')) return;
+                          doSplit();
+                        }}
+                      >确认拆分</button>
+                    </div>
+                  </div>
+                )}
             </div>
           );
         })}
