@@ -74,6 +74,7 @@ export function WizardPage({
   const [taskId, setTaskId] = useState('');
   const [dragging, setDragging] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const taskRef = useRef('');
 
   useEffect(() => () => {
@@ -193,8 +194,10 @@ export function WizardPage({
         {step === 'pick' && (
           <div>
             <h1 className="w-h1">给视频加字幕</h1>
-            <label
+            <div
               className={'w-drop' + (dragging ? ' on' : '')}
+              role="button"
+              onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={(e) => {
@@ -208,12 +211,13 @@ export function WizardPage({
               <div className="d">支持 mp4 · mkv · mov · avi · flv · webm</div>
               <div className="w-promise"><IconShield /><span>原视频不会被改动，成品另存为新文件</span></div>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="video/*"
                 style={{ display: 'none' }}
                 onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
               />
-            </label>
+            </div>
           </div>
         )}
 
@@ -334,7 +338,10 @@ export function WizardPage({
             </div>
             <div className="w-actions">
               <button className="w-btn w-primary" onClick={() => void openFolder()}>打开文件夹</button>
-              <button className="w-btn w-ghost" onClick={() => onEditTask(taskId)}>改字幕</button>
+              <button className="w-btn w-ghost" onClick={() => {
+                onEditTask(taskId);
+                setTimeout(() => document.getElementById('sub-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+              }}>改字幕</button>
               <button className="w-btn w-ghost" onClick={reset}>再做一个</button>
             </div>
             {error && <div className="w-err">{error}</div>}

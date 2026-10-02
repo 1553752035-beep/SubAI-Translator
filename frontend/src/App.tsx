@@ -348,7 +348,9 @@ export default function App() {
               {activeTaskId && (
                 <>
                   <TaskProgress taskId={activeTaskId} />
-                  <SimpleSubtitleEditor taskId={activeTaskId} />
+                  <div id="sub-editor">
+                    <SimpleSubtitleEditor taskId={activeTaskId} />
+                  </div>
                 </>
               )}
             </>
