@@ -165,11 +165,11 @@ export function SettingsPage() {
     }
   };
 
-  const runTest = async () => {
+  const runTest = async (mode?: 'local' | 'cloud' | 'hybrid') => {
     setTesting(true);
     setTestResult(null);
     try {
-      setTestResult(await testLlm(llm ? llm.mode : undefined));
+      setTestResult(await testLlm(mode ?? (llm ? llm.mode : undefined)));
     } catch (err: any) {
       const detail = err && err.response ? err.response.data.detail : null;
       setTestResult({ reachable: false, detail: typeof detail === 'string' ? detail : '测试失败' });
@@ -287,9 +287,12 @@ export function SettingsPage() {
               <button
                 className="btn"
                 disabled={busy}
-                onClick={() => {
+                onClick={async () => {
                   const sel = providers.find((x) => x.id === providerId);
-                  void switchMode(sel && sel.group === '本地' ? 'local' : 'cloud');
+                  const target: 'local' | 'cloud' = sel && sel.group === '本地' ? 'local' : 'cloud';
+                  await switchMode(target);
+                  // 五期：切完立刻测「刚切换的那个模式」，避免测到旧模式造成误解
+                  await runTest(target);
                 }}
               >
                 保存并使用
