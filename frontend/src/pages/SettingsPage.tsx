@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   checkHealth,
-  clearCache,
   getAsrDevice,
-  getCacheStats,
   getCurrentUser,
   getLlmStatus,
-  getQueueStats,
   getTranslationSettings,
   getLanguages,
   detectLanguage,
@@ -21,9 +18,7 @@ import {
 import type {
   AsrDeviceInfo,
   LanguageStats,
-  CacheStats,
   LlmStatus,
-  QueueStats,
   TranslationSettings,
   UserInfo,
 } from '../types';
@@ -42,10 +37,7 @@ export function SettingsPage() {
   const [health, setHealth] = useState<any>(null);
   const [asr, setAsr] = useState<AsrDeviceInfo | null>(null);
   const [llm, setLlm] = useState<LlmStatus | null>(null);
-  const [cache, setCache] = useState<CacheStats | null>(null);
-  const [queue, setQueue] = useState<QueueStats | null>(null);
   const [term, setTerm] = useState<TranslationSettings | null>(null);
-  const [adminNote, setAdminNote] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -79,13 +71,7 @@ export function SettingsPage() {
       setCloudModel(s.cloud.model || '');
     } catch { setLlm(null); }
     try {
-      setCache(await getCacheStats());
-      setQueue(await getQueueStats());
-      setAdminNote('');
     } catch {
-      setCache(null);
-      setQueue(null);
-      setAdminNote('缓存 / 队列统计需要管理员权限');
     }
   }, []);
 
@@ -226,10 +212,6 @@ export function SettingsPage() {
     }
   };
 
-  const doClearCache = async () => {
-    try { const r = await clearCache(); setMsg(r.message || '缓存已清空'); await load(); }
-    catch { setMsg('清空缓存失败（需要管理员权限）'); }
-  };
 
 
   const qs = (health && health.queue_stats) || null;
@@ -448,21 +430,6 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="table-card">
-          <div className="table-head">
-            <div className="t">运维（管理员）</div>
-            <div className="cnt">{adminNote}</div>
-          </div>
-          <div className="set-body">
-            <Row label="缓存条目" value={cache ? String(cache.total_entries) : '-'} />
-            <Row label="缓存命中率" value={cache ? (String(cache.hit_rate) + '%') : '-'} />
-            <Row label="缓存容量" value={cache ? (String(cache.size_mb) + ' MB / TTL ' + String(cache.ttl_days) + ' 天') : '-'} />
-            <Row label="队列并发上限" value={queue ? String(queue.max_concurrent) : '-'} />
-            <div className="set-actions">
-              <button className="btn" disabled={!cache} onClick={() => void doClearCache()}>清空翻译缓存</button>
-            </div>
-          </div>
-        </div>
 
       </div>
     </>
