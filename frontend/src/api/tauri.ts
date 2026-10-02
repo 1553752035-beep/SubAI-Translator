@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 
+// 五期：后端是 206MB 单文件程序，首次启动要十几秒。
+// 之前每次健康检查失败都会再调一次 start_backend，而 Rust 侧会先杀掉旧进程再起新的，
+// 结果后端永远来不及就绪（日志里就是"刚 spawn 就被 kill"）。这里加冷却期，杜绝自相残杀。
+let __lastStartBackend = 0;
+const __START_COOLDOWN_MS = 60000;
+
 /**
  * 与 Tauri(Rust) 侧的通信层。
  *
@@ -20,6 +26,11 @@ export async function checkBackendHealth(): Promise<boolean> {
 
 /** 启动内置后端（sidecar），返回启动结果描述 */
 export async function startBackend(): Promise<string> {
+  const __now = Date.now();
+  if (__now - __lastStartBackend < __START_COOLDOWN_MS) {
+    throw new Error('后端正在启动中，请稍候（已跳过重复启动）');
+  }
+  __lastStartBackend = __now;
   try {
     return await invoke('start_backend');
   } catch (error) {

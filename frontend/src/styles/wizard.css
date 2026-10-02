@@ -73,3 +73,6 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-text input{width:100%;background:var(--w-input);color:var(--w-text);border:1px solid var(--w-accent);border-radius:8px;padding:6px 10px;font-family:inherit;font-size:14px;outline:none}
 .w-msg{color:var(--w-ok);font-size:13px;margin-top:10px;text-align:center}
 .sidebar.w-hidden{display:none}
+/* 五期：连接中的转圈（让等待可视化，不再干等） */
+.w-spin{width:28px;height:28px;margin:0 auto 16px;border:3px solid var(--w-line);border-top-color:var(--w-accent);border-radius:50%;animation:w-rot .8s linear infinite}
+@keyframes w-rot{to{transform:rotate(360deg)}}

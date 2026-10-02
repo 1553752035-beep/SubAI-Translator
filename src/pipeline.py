@@ -264,6 +264,43 @@ def _norm(text: str) -> str:
 # --------------------------------------------------------------------------- #
 # 第3步：翻译（集成术语库）
 # --------------------------------------------------------------------------- #
+#: 五期：累计 token 用量（云端模式烧的是钱，要能看见）
+_TOKEN_USAGE = {"prompt": 0, "completion": 0}
+
+
+def reset_token_usage() -> None:
+    _TOKEN_USAGE["prompt"] = 0
+    _TOKEN_USAGE["completion"] = 0
+
+
+def get_token_usage() -> dict:
+    return {"prompt": _TOKEN_USAGE["prompt"], "completion": _TOKEN_USAGE["completion"],
+            "total": _TOKEN_USAGE["prompt"] + _TOKEN_USAGE["completion"]}
+
+
+def _no_thinking_params(url: str, model: str) -> dict:
+    """按服务商关掉「思考」，防止推理模型把额度烧在思考 token 上。
+
+    只对**明确支持该参数**的端点发送，避免未知参数导致请求报错。
+    """
+    u = (url or "").lower()
+    m = (model or "").lower()
+    if any(k in u for k in ("siliconflow", "bigmodel", "dashscope", "aliyun", "modelscope")):
+        return {"enable_thinking": False}
+    if "openrouter" in u:
+        return {"reasoning": {"enabled": False}}
+    if m.startswith(("o1", "o3", "o4")):
+        return {"reasoning_effort": "low"}
+    return {}
+
+
+def _adaptive_max_tokens(text: str) -> int:
+    """按文本长度自适应上限：固定 256 会截断长句，也会给短句浪费额度。"""
+    base = int(_cfg.llm.max_tokens)
+    ceiling = max(base, 1024)
+    return max(base, min(ceiling, 32 + len(text) * 3))
+
+
 def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[assignment]
               url: Optional[str] = None, model: Optional[str] = None,
               api_key: Optional[str] = None) -> str:
@@ -310,9 +347,11 @@ def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[ass
                 "no quotes, keep it short." % target},
             {"role": "user", "content": text},
         ],
-        "max_tokens": _cfg.llm.max_tokens,
+        "max_tokens": _adaptive_max_tokens(text),
         "temperature": _cfg.llm.temperature,
     }
+    # 五期：关思考（推理模型的思考 token 也计费，翻译场景完全不需要）
+    payload.update(_no_thinking_params(url, model or ""))
 
     def _do_post():
         # raise_for_status 必须放在**重试内部**：
@@ -329,7 +368,14 @@ def _call_llm(text: str, target: str, timeout: float = None,  # type: ignore[ass
             base_delay=_cfg.llm.retry_delay,
             retry_on=(httpx.HTTPError, ConnectionError, TimeoutError),
         )
-        return r.json()["choices"][0]["message"]["content"].strip()
+        data = r.json()
+        try:
+            usage = data.get("usage") or {}
+            _TOKEN_USAGE["prompt"] += int(usage.get("prompt_tokens") or 0)
+            _TOKEN_USAGE["completion"] += int(usage.get("completion_tokens") or 0)
+        except Exception:  # noqa: BLE001
+            pass
+        return data["choices"][0]["message"]["content"].strip()
     except RetryExhausted as e:
         raise RuntimeError(f"翻译请求失败（重试 {_cfg.llm.max_retries} 次后仍失败）: {e.last_exception}")
     except Exception as e:

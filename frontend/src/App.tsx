@@ -13,7 +13,7 @@ import { startBackend, checkBackendHealth, getSystemInfo } from './api/tauri';
 import type { SystemInfo } from './api/tauri';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LoginPage } from './pages/LoginPage';
-import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth, ensureLocalToken } from './api';
+import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth, ensureLocalToken, getLocalTokenError } from './api';
 import type { UserInfo, LlmStatus } from './types';
 
 type TabId = 'home' | 'tasks' | 'terms' | 'plugins' | 'openapi' | 'settings' | 'help';
@@ -61,6 +61,10 @@ export default function App() {
   // 五期：高级功能默认收起来，主界面只留三段式向导
   const [navOpen, setNavOpen] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
+  // 后端是否要求账号登录（默认否 = 免登录模式）
+  const [requireLogin, setRequireLogin] = useState(false);
+  const [connectTries, setConnectTries] = useState(0);
+  const [connectLog, setConnectLog] = useState("");
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
   const [llmMsg, setLlmMsg] = useState('');
@@ -116,9 +120,21 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const verify = async () => {
-      // 账号模式：有令牌就校验；免登录模式：尝试取本机令牌（拿不到才回登录页）
+      // 账号模式：有令牌就校验。
+      // 免登录模式：反复尝试取本机令牌（后端首次启动要十几秒），
+      // 期间**不显示登录页**，主界面照常渲染。
       if (!getToken()) {
-        const local = await ensureLocalToken();
+        let local = await ensureLocalToken(true);
+        let tries = 0;
+        while (!local && !cancelled && tries < 20) {
+          if (!cancelled) {
+            setConnectTries(tries + 1);
+            setConnectLog(getLocalTokenError());
+          }
+          await new Promise((r) => setTimeout(r, 1500));
+          tries += 1;
+          local = await ensureLocalToken(true);
+        }
         if (!local) {
           if (!cancelled) setAuthChecked(true);
           return;
@@ -126,11 +142,19 @@ export default function App() {
       }
       try {
         const me = await getCurrentUser();
-        if (!cancelled) setUser(me);
-      } catch {
-        if (!cancelled) setUser(null);
-      } finally {
-        if (!cancelled) setAuthChecked(true);
+        if (!cancelled) { setUser(me); setAuthChecked(true); }
+        return;
+      } catch (e: any) {
+        // 令牌有了但后端还没就绪（还在启动/正在被拉起）：显示真实原因并继续重试，
+        // 不要停在"正在连接"上让人干等。
+        if (!cancelled) {
+          setConnectLog('后端还没就绪：' + String(e?.message || e));
+          setConnectTries((v) => v + 1);
+          setUser(null);
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!cancelled) void verify();
+        return;
       }
     };
     void verify();
@@ -160,6 +184,7 @@ export default function App() {
     const loadQueue = async () => {
       try {
         const h = await checkHealth();
+    if (!cancelled) setRequireLogin(!!(h as any)?.require_login);
         const qs = (h && h.queue_stats) || {};
         if (!cancelled) {
           setQueue({ running: qs.running_count || 0, waiting: qs.queue_size || 0 });
@@ -239,7 +264,34 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginPage onAuthenticated={setUser} />;
+    // 还没有当前用户：
+  //  - 后端明确要求登录 → 显示登录页（需要 SUBAI_AUTH_REQUIRE_LOGIN=true）
+  //  - 否则（免登录模式）→ 显示"正在连接"，等本机令牌到位，**绝不弹登录页**
+  if (!user) {
+    if (requireLogin) {
+      return <LoginPage onAuthenticated={setUser} />;
+    }
+    return (
+      <div className="w-app">
+        <div className="w-wrap" style={{ textAlign: 'center', paddingTop: 90 }}>
+          <div className="w-spin" />
+          <h1 className="w-h1">正在连接后端服务…</h1>
+          <div className="w-sub">
+            首次启动需要十几秒（后端是单文件程序），请稍候。
+            {connectTries > 0 && <div style={{ marginTop: 8 }}>已尝试 {connectTries} 次</div>}
+          </div>
+          {connectLog && (
+            <div className="w-err" style={{ textAlign: 'left', display: 'inline-block' }}>
+              取本机令牌失败：{connectLog}
+              <div style={{ marginTop: 6, opacity: 0.8 }}>
+                可截图给我；或直接告诉我 D:\SubAI-Translator\tauri_debug.log 的最后几行。
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
   }
 
   return (

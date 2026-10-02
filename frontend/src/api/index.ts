@@ -39,19 +39,39 @@ const TOKEN_KEY = 'subai_access_token';
 // 五期：免登录模式 —— 本机令牌（由 Tauri 读取后端生成的 data/local_token.txt）
 let _localToken: string | null = null;
 let _localTokenResolved = false;
+let _localTokenError = '';
 
-export const ensureLocalToken = async (): Promise<string | null> => {
-  if (_localTokenResolved) return _localToken;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const token = await invoke<string>('get_local_token');
-    _localToken = token || null;
-  } catch {
-    _localToken = null;   // 非 Tauri 环境（纯浏览器打开）没有本机令牌
+export const ensureLocalToken = async (force = false): Promise<string | null> => {
+  if (_localTokenResolved && !force) return _localToken;
+
+  // 通道 1（主）：Rust 侧在启动后把令牌注入网页（window.__SUBAI_LOCAL_TOKEN__）
+  const injected = (window as any).__SUBAI_LOCAL_TOKEN__;
+  if (injected) {
+    _localToken = String(injected);
+    _localTokenResolved = true;
+    _localTokenError = "";
+    return _localToken;
   }
-  _localTokenResolved = true;
+
+  // 通道 2（兜底）：Tauri 命令；带 3 秒超时，绝不让界面被挂住
+  try {
+    const invokePromise = (async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<string>('get_local_token');
+    })();
+    const timeout = new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error('取令牌超时（3 秒）')), 3000));
+    const token = await Promise.race([invokePromise, timeout]);
+    _localToken = token || null;
+    if (_localToken) _localTokenResolved = true;
+  } catch (e: any) {
+    _localToken = null;
+    _localTokenError = String(e?.message || e || '未知错误');
+  }
   return _localToken;
 };
+
+export const getLocalTokenError = (): string => _localTokenError;
 
 export const resetLocalToken = (): void => {
   _localToken = null;

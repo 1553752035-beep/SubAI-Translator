@@ -64,6 +64,7 @@ from src.compose import burn_hardsub, mux_softsub
 from src.tts import get_engine as get_tts_engine, synthesize_segments, voice_for_language
 from src import llm as llm_module
 from src import languages as languages_module
+from src import llm_providers as llm_providers_module
 from src import analytics as analytics_module
 from src.openapi.keys import ApiKey, get_api_key_manager
 from src.openapi.ratelimit import get_key_limiter
@@ -953,6 +954,12 @@ async def process_transcode_task(
 # --------------------------------------------------------------------------- #
 # API路由
 # --------------------------------------------------------------------------- #
+
+@app.get("/api/llm/providers")
+async def list_llm_providers(current_user: UserRecord = Depends(get_current_user)):
+    """五期：云端翻译服务商预设（前端用它渲染"选服务商 + 只填 Key"）。"""
+    return {"providers": llm_providers_module.list_providers()}
+
 
 @app.get("/api/health")
 async def health_check():

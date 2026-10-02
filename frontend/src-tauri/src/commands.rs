@@ -382,10 +382,8 @@ pub async fn open_in_explorer(path: String) -> Result<(), String> {
 // 五期：本机令牌（免登录模式）
 // --------------------------------------------------------------------------- //
 
-#[tauri::command]
-pub async fn get_local_token() -> Result<String, String> {
-    // 后端把令牌写在「后端 exe 所在目录/data/local_token.txt」。
-    // Tauri 与后端装在同一目录，所以先看 exe 所在的目录，再看工作目录。
+/// 读本机令牌（供注入网页与命令共用）。找不到返回 None。
+pub fn read_local_token_file() -> Option<String> {
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -395,22 +393,44 @@ pub async fn get_local_token() -> Result<String, String> {
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("data").join("local_token.txt"));
     }
+    for path in &candidates {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let token = text.trim().to_string();
+            if !token.is_empty() {
+                return Some(token);
+            }
+        }
+    }
+    None
+}
 
-    // 首次启动时后端可能还没写完，最多等 10 秒
-    for attempt in 0..20 {
-        for path in &candidates {
-            if let Ok(text) = std::fs::read_to_string(path) {
+#[tauri::command]
+pub fn get_local_token() -> Result<String, String> {
+    // 同步命令：不碰 tokio（异步 + sleep 曾让这个调用挂住），立即返回；
+    // 后端启动慢由前端负责重试（前端有重试循环）。
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("data").join("local_token.txt"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("data").join("local_token.txt"));
+    }
+    let mut tried: Vec<String> = Vec::new();
+    for path in &candidates {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
                 let token = text.trim().to_string();
                 if !token.is_empty() {
                     return Ok(token);
                 }
+                tried.push(format!("{} (空文件)", path.display()));
             }
-        }
-        if attempt < 19 {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            Err(e) => tried.push(format!("{} ({})", path.display(), e)),
         }
     }
-    Err("未找到本机令牌（后端可能还没启动）".into())
+    Err(format!("未找到本机令牌，已尝试: {}", tried.join("; ")))
 }
 
 // --------------------------------------------------------------------------- //

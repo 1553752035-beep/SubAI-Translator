@@ -212,7 +212,8 @@ class ServerConfig(BaseSettings):
     """服务器配置"""
     model_config = SettingsConfigDict(env_prefix="SUBAI_SERVER_")
     
-    host: str = Field(default="0.0.0.0", description="监听地址")
+    # 五期：免登录模式默认只监听本机；要给局域网其它机器用，设 SUBAI_SERVER_HOST=0.0.0.0
+    host: str = Field(default="127.0.0.1", description="监听地址")
     port: int = Field(default=8000, description="监听端口")
     cors_origins: list[str] = Field(default=["*"], description="CORS允许的来源")
     reload: bool = Field(default=False, description="开发模式是否自动重载")
