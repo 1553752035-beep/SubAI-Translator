@@ -312,7 +312,7 @@ export default function App() {
                 ← 返回主界面
               </button>
             )}
-            <span>{requireLogin ? user.username : "本机用户"}</span>
+            
           {requireLogin && user.role === 'admin' && <em>管理员</em>}
           <button
             className="win-btn"
@@ -334,9 +334,7 @@ export default function App() {
 
       <div className="main-content">
         <div className={'sidebar' + (navOpen ? '' : ' w-hidden')}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-  <button className="w-btn w-ghost" onClick={() => { setNavOpen(false); setActiveTab("home"); }}>← 返回主界面</button>
-</div>
+            <button className="w-btn w-ghost" style={{ marginBottom: 10, width: "100%" }} onClick={() => setNavOpen(false)}>收起</button>
           {NAV_ITEMS.map((item) => (
             <div
               key={item.id}
@@ -389,6 +387,12 @@ export default function App() {
         </div>
 
         <div className="content">
+          {activeTab !== 'home' && !navOpen && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button className="w-btn w-ghost" title="打开侧边栏" style={{ padding: "5px 11px" }} onClick={() => setNavOpen(true)}>☰</button>
+              <button className="w-btn w-ghost" title="返回主界面" style={{ padding: "5px 11px" }} onClick={() => setActiveTab('home')}>←</button>
+            </div>
+          )}
           {llmStatus && !llmReady && (
             <div className="notice warn">
               <b>翻译后端不可用</b>：{llmHint}。任务会在翻译阶段失败——请先启动本地翻译服务，或在“设置 → 翻译后端”中配置并切换到云端 API。
