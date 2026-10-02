@@ -79,3 +79,10 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 /* 五期：高级=覆盖式抽屉（对齐 v5 定稿），不再挤压主界面 */
 /* 长 URL（如本地服务地址）不要溢出侧边栏 */
 .sidebar.w-drawer *{max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+/* 五期：确认页——键位提示、当前行、已改标记、行内撤销 */
+.w-kbd{display:inline-block;border:1px solid var(--w-line2);border-radius:5px;padding:0 5px;font-size:11.5px;color:var(--w-dim);margin:0 2px}
+.w-subrow.cur{background:var(--w-soft);box-shadow:inset 2px 0 0 var(--w-accent)}
+.w-changed{font-size:11px;color:var(--w-ok);border:1px solid var(--w-ok);border-radius:20px;padding:0 6px;margin-left:8px}
+.w-undo{font-size:11.5px;color:var(--w-dim);border:1px solid var(--w-line2);border-radius:20px;padding:0 7px;margin-left:6px;cursor:pointer;opacity:0;transition:.15s}
+.w-subrow:hover .w-undo{opacity:1}
+.w-undo:hover{color:var(--w-accent);border-color:var(--w-accent)}
