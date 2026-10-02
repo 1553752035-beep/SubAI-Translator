@@ -10,7 +10,7 @@ const mmss = (t: number): string => {
   return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
 };
 
-type Snap = { i: number; text: string; dirty: boolean };
+type Snap = { i: number; text: string; dirty: boolean; rows?: SubtitleSegment[] };
 
 /** 五期：可疑行判断（后端暂未提供置信度，先用可算的启发式）
  *  规则：空文本 / 极短却占很久 / 每秒字数异常 / 疑似外文或纯数字
@@ -71,7 +71,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     const before = textOf(segments[i]);
     const v = draft;
     if (v !== before) {
-      historyRef.current.push({ i, text: before, dirty: !!dirty[i] });
+      historyRef.current.push({ i, text: before, dirty: !!dirty[i], rows: undefined });
       setSegments((prev) => prev.map((s, idx) => (idx === i ? { ...s, translation: v } : s)));
       setDirty((d) => ({ ...d, [i]: true }));
     }
@@ -80,9 +80,39 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
 
   const cancel = () => { setEditing(-1); };
 
+  /** 五期：断句修正——把相邻两行并成一行（时间取并集，文字相接） */
+  const mergeRows = (i: number, dir: 'up' | 'down') => {
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= segments.length) { setMsg('已经到头了'); return; }
+    const a = dir === 'up' ? segments[j] : segments[i];
+    const b = dir === 'up' ? segments[i] : segments[j];
+    const merged: SubtitleSegment = {
+      ...a,
+      end: b.end,
+      source: (a.source || '') + (b.source || ''),
+      translation: (a.translation || a.source || '') + (b.translation || b.source || ''),
+    };
+    historyRef.current.push({ i, text: textOf(segments[i]), dirty: !!dirty[i], rows: segments.map((x) => ({ ...x })) });   // 撤销用（带整表快照）
+    setSegments((prev) => {
+      const next = [...prev];
+      next.splice(j, 2, merged);
+      return next;
+    });
+    setDirty((d) => { const n = { ...d }; delete n[i]; n[j] = true; return n; });
+    setCur(j);
+    setMsg('已合并两行（Ctrl+Z 可撤销这一步）');
+  };
+
   const undo = () => {
     const last = historyRef.current.pop();
     if (!last) { setMsg('没有可撤销的修改'); return; }
+    if (last.rows) {
+      setSegments(last.rows);
+      setCur(last.i);
+      setMsg('已撤销上一步（含合并）');
+      setTimeout(() => setMsg(''), 2000);
+      return;
+    }
     setSegments((prev) => prev.map((s, idx) => (idx === last.i ? { ...s, translation: last.text } : s)));
     setDirty((d) => ({ ...d, [last.i]: last.dirty }));
     setCur(last.i);
@@ -153,7 +183,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     <div style={{ marginTop: 26 }}>
       <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
       <div className="w-sub">点哪行改哪行；只改文字，时间不用管。{suspectCount > 0 && <>　·　<b style={{ color: 'var(--w-warn, #b7791f)' }}>可疑 {suspectCount} 处</b>（黄底行，建议看一下）</>}</div>
-      <div className="w-sub"><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销</div>
+      <div className="w-sub"><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销　·　鼠标移到行上可「并入上行/下行」修正断句</div>
       <div className="w-subs">
         {segments.map((s, i) => {
           const isCur = i === cur;
@@ -178,6 +208,12 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
                   />
                 ) : (
                   <span>{textOf(s)}{sus && <span className="w-suspect">{sus}</span>}</span>
+                )}
+                {!isEd && (
+                  <span className="w-rowacts">
+                    {i > 0 && <span className="w-merge" title="与上一行合并（断句修错）" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'up'); }}>⇧ 并入上行</span>}
+                    {i < segments.length - 1 && <span className="w-merge" title="与下一行合并（断句修错）" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'down'); }}>⇩ 并入下行</span>}
+                  </span>
                 )}
                 {dirty[i] && !isEd && <span className="w-changed">已改</span>}
                 {dirty[i] && !isEd && (
