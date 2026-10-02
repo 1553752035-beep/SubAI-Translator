@@ -321,25 +321,6 @@ export default function App() {
           <div className="divider" />
 
           <div className="mode-card">
-            <div className="hint">
-              {llmStatus ? (
-                <>
-                  <span
-                    className={
-                      'dot ' +
-                      (llmStatus.mode === 'local'
-                        ? (llmStatus.local.reachable ? 'ok' : 'bad')
-                        : (llmStatus.cloud.has_key ? 'ok' : 'bad'))
-                    }
-                  />
-                  {llmStatus.mode === 'local'
-                    ? (llmStatus.local.reachable ? '本地模型已就绪' : '本地模型未就绪')
-                    : (llmStatus.cloud.has_key ? '云端已配置 Key' : '云端未配置 Key')}
-                  <br />
-                  {llmStatus.effective.model || '-'} · {llmStatus.effective.url || '未配置端点'}
-                </>
-              ) : '正在读取后端配置…'}
-            </div>
           </div>
         </div>
 
