@@ -368,18 +368,25 @@ fn get_gpu_info() -> Result<(f64, f64, f64), String> {
 #[tauri::command]
 pub async fn get_help_info() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
-        "version": "2.0.0",
+        "version": "4.1.0",
         "features": [
             "视频字幕识别 (ASR)",
             "硬字幕 OCR 识别",
+            "多语言支持（72 种语言，可自动检测）",
+            "术语库管理（强制锁定 / 软提示）",
             "多格式输出 (SRT/VTT/ASS/JSON)",
-            "术语库管理",
-            "实时进度显示"
+            "视频压制与配音（硬字幕 / 软字幕 / 时间轴对齐配音）",
+            "插件系统（翻译 / OCR / TTS 能力可替换，可禁用）",
+            "开放平台（API 密钥、限流、Webhook 回调、Python/JS SDK）",
+            "数据分析与报表导出（Excel / PDF / HTML）",
+            "任务取消与实时进度"
         ],
         "shortcuts": {
             "upload": "拖拽视频文件到上传区域",
             "start": "点击'开始翻译'按钮",
-            "cancel": "点击'取消'按钮"
+            "cancel": "点击'取消'按钮",
+            "plugins": "在插件页启用或禁用翻译、OCR、TTS 能力",
+            "openapi": "在开放平台页创建 API 密钥与 Webhook"
         }
     }))
 }

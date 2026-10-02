@@ -267,3 +267,37 @@ export interface LanguageDetectResult {
   method: string;
   candidates: { code: string; score: number }[];
 }
+
+export interface ApiKeyInfo {
+  key_id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  enabled: boolean;
+  revoked: boolean;
+  rate_limit: number | null;
+  call_count: number;
+  error_count: number;
+  success_rate: number;
+  last_used_at: number | null;
+}
+
+export interface WebhookInfo {
+  webhook_id: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  secret: string;
+  created_at: number;
+}
+
+export interface DeliveryInfo {
+  delivery_id: string;
+  webhook_id: string;
+  event: string;
+  status: string;
+  attempts: number;
+  status_code: number;
+  error: string;
+  created_at: number;
+}

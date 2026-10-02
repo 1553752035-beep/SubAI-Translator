@@ -24,6 +24,9 @@ import type {
   PluginMarketplaceEntry,
   LanguageStats,
   LanguageDetectResult,
+  ApiKeyInfo,
+  WebhookInfo,
+  DeliveryInfo,
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -365,4 +368,72 @@ export const downloadReport = async (format: string, kind = "summary"): Promise<
   link.download = "subai-" + kind + "." + format;
   link.click();
   URL.revokeObjectURL(url);
+};
+
+// --------------------------------------------------------------------------- //
+// 四期深化：开放平台（密钥 / Webhook 管理）
+// --------------------------------------------------------------------------- //
+
+export const getOpenApiKeys = async (): Promise<{ keys: ApiKeyInfo[]; stats: any }> => {
+  const response = await api.get("/openapi/keys");
+  return response.data;
+};
+
+export const createOpenApiKey = async (
+  name: string, scopes: string[], rateLimit: number | null,
+): Promise<{ secret: string; key: ApiKeyInfo; notice: string }> => {
+  const response = await api.post("/openapi/keys", { name, scopes, rate_limit: rateLimit });
+  return response.data;
+};
+
+export const setKeyEnabled = async (keyId: string, enabled: boolean): Promise<any> => {
+  const response = await api.post(`/openapi/keys/${keyId}/${enabled ? "enable" : "disable"}`);
+  return response.data;
+};
+
+export const revokeOpenApiKey = async (keyId: string): Promise<any> => {
+  const response = await api.delete(`/openapi/keys/${keyId}`);
+  return response.data;
+};
+
+export const setKeyRateLimit = async (keyId: string, rateLimit: number | null): Promise<any> => {
+  const response = await api.post(`/openapi/keys/${keyId}/rate-limit`, { rate_limit: rateLimit });
+  return response.data;
+};
+
+export const getWebhooks = async (): Promise<{ webhooks: WebhookInfo[]; stats: any; events: string[] }> => {
+  const response = await api.get("/openapi/webhooks");
+  return response.data;
+};
+
+export const createWebhook = async (
+  url: string, events: string[] | null,
+): Promise<{ webhook: WebhookInfo; secret: string; notice: string }> => {
+  const response = await api.post("/openapi/webhooks", { url, events });
+  return response.data;
+};
+
+export const setWebhookEnabled = async (webhookId: string, enabled: boolean): Promise<any> => {
+  const response = await api.post(`/openapi/webhooks/${webhookId}/${enabled ? "enable" : "disable"}`);
+  return response.data;
+};
+
+export const deleteWebhook = async (webhookId: string): Promise<any> => {
+  const response = await api.delete(`/openapi/webhooks/${webhookId}`);
+  return response.data;
+};
+
+export const testWebhook = async (webhookId: string): Promise<any> => {
+  const response = await api.post(`/openapi/webhooks/${webhookId}/test`);
+  return response.data;
+};
+
+export const getWebhookDeliveries = async (webhookId: string): Promise<{ deliveries: DeliveryInfo[] }> => {
+  const response = await api.get(`/openapi/webhooks/${webhookId}/deliveries`);
+  return response.data;
+};
+
+export const retryDelivery = async (deliveryId: string): Promise<any> => {
+  const response = await api.post(`/openapi/webhooks/deliveries/${deliveryId}/retry`);
+  return response.data;
 };
