@@ -75,6 +75,7 @@ from src.plugins.manifest import VALID_KINDS as PLUGIN_KINDS
 from src.subtitles import load_task_segments, save_task_segments
 from src.logging_config import setup_logging
 from src.auth.dependencies import get_current_user, get_current_admin
+from src.auth.local_token import ensure_local_token
 from src.auth.security import create_access_token
 from src.auth.users import UserRecord, UserManager, get_user_manager
 from src.backup.manager import AsyncBackupManager
@@ -144,6 +145,7 @@ class HealthResponse(BaseModel):
     """健康检查响应"""
     status: str
     version: str = APP_VERSION
+    require_login: bool = config.auth.require_login
     llm_mode: str = config.llm.mode
     asr_device: str = config.asr.device
     queue_stats: dict = {}
@@ -427,6 +429,13 @@ async def lifespan(app: FastAPI):
         logger.info("Webhook 巡检已启动")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Webhook 恢复失败（不影响主流程）: {e!r}")
+
+    # 五期：免登录模式 —— 确保本机令牌存在（前端读它访问；外部程序拿不到就调不动）
+    try:
+        if not config.auth.require_login:
+            ensure_local_token()
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"本机令牌初始化失败（不影响启动）: {e!r}")
 
     logger.info("API服务启动完成")
     

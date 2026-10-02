@@ -12,7 +12,7 @@ import { startBackend, checkBackendHealth, getSystemInfo } from './api/tauri';
 import type { SystemInfo } from './api/tauri';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LoginPage } from './pages/LoginPage';
-import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth } from './api';
+import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth, ensureLocalToken } from './api';
 import type { UserInfo, LlmStatus } from './types';
 
 type TabId = 'home' | 'tasks' | 'terms' | 'plugins' | 'openapi' | 'settings' | 'help';
@@ -101,9 +101,13 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const verify = async () => {
+      // 账号模式：有令牌就校验；免登录模式：尝试取本机令牌（拿不到才回登录页）
       if (!getToken()) {
-        if (!cancelled) setAuthChecked(true);
-        return;
+        const local = await ensureLocalToken();
+        if (!local) {
+          if (!cancelled) setAuthChecked(true);
+          return;
+        }
       }
       try {
         const me = await getCurrentUser();

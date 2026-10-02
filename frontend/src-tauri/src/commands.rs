@@ -362,6 +362,41 @@ fn get_gpu_info() -> Result<(f64, f64, f64), String> {
 // --------------------------------------------------------------------------- //
 
 // --------------------------------------------------------------------------- //
+// 五期：本机令牌（免登录模式）
+// --------------------------------------------------------------------------- //
+
+#[tauri::command]
+pub async fn get_local_token() -> Result<String, String> {
+    // 后端把令牌写在「后端 exe 所在目录/data/local_token.txt」。
+    // Tauri 与后端装在同一目录，所以先看 exe 所在的目录，再看工作目录。
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("data").join("local_token.txt"));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("data").join("local_token.txt"));
+    }
+
+    // 首次启动时后端可能还没写完，最多等 10 秒
+    for attempt in 0..20 {
+        for path in &candidates {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                let token = text.trim().to_string();
+                if !token.is_empty() {
+                    return Ok(token);
+                }
+            }
+        }
+        if attempt < 19 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+    Err("未找到本机令牌（后端可能还没启动）".into())
+}
+
+// --------------------------------------------------------------------------- //
 // 帮助信息
 // --------------------------------------------------------------------------- //
 

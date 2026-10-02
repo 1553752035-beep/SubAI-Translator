@@ -36,6 +36,30 @@ const TOKEN_KEY = 'subai_access_token';
 // 令牌存取（登录页与拦截器共用；后端所有业务接口都需要它）
 // --------------------------------------------------------------------------- //
 
+// 五期：免登录模式 —— 本机令牌（由 Tauri 读取后端生成的 data/local_token.txt）
+let _localToken: string | null = null;
+let _localTokenResolved = false;
+
+export const ensureLocalToken = async (): Promise<string | null> => {
+  if (_localTokenResolved) return _localToken;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const token = await invoke<string>('get_local_token');
+    _localToken = token || null;
+  } catch {
+    _localToken = null;   // 非 Tauri 环境（纯浏览器打开）没有本机令牌
+  }
+  _localTokenResolved = true;
+  return _localToken;
+};
+
+export const resetLocalToken = (): void => {
+  _localToken = null;
+  _localTokenResolved = false;
+};
+
+export const getLocalToken = (): string | null => _localToken;
+
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
 
 export const setToken = (token: string): void => localStorage.setItem(TOKEN_KEY, token);
@@ -48,11 +72,18 @@ export const api = axios.create({
 });
 
 // 附加 Bearer 令牌；未登录时不附加，由后端返回 401
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
   const token = getToken();
   if (token) {
     config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  }
+  // 免登录模式：带上本机令牌
+  const local = await ensureLocalToken();
+  if (local) {
+    config.headers = config.headers ?? {};
+    config.headers['X-Local-Token'] = local;
   }
   return config;
 });
@@ -62,8 +93,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      clearToken();
-      window.dispatchEvent(new Event('subai:unauthorized'));
+      // 只有"账号登录"模式才回登录页；免登录模式不要因为一次 401 就跳走
+      if (getToken()) {
+        clearToken();
+        window.dispatchEvent(new Event('subai:unauthorized'));
+      }
     }
     return Promise.reject(error);
   },

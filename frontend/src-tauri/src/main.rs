@@ -12,6 +12,7 @@ fn main() {
             commands::start_backend,
             commands::get_system_info,
             commands::get_help_info,
+            commands::get_local_token,
         ])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {

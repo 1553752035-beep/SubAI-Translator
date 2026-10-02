@@ -254,6 +254,9 @@ class AuthConfig(BaseSettings):
     users_db: str = Field(default_factory=lambda: os.path.join("{root}", "data", "users.db"))
     admin_username: str = Field(default="admin", description="首次启动自动创建的管理员用户名")
     admin_password: str = Field(default="admin123", description="首次启动自动创建的管理员密码（生产环境务必修改）")
+    # 五期：默认免登录（本机令牌）；需要多人/局域网使用时把 require_login 打开即可恢复账号登录
+    require_login: bool = Field(default=False, description="是否要求账号登录（默认关闭：免登录，用本机令牌）")
+    local_token_file: str = Field(default="", description="本机令牌文件路径（留空则用 data/local_token.txt）")
 
 
 class QuotaConfig(BaseSettings):
