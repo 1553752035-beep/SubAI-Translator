@@ -2025,6 +2025,7 @@ async def llm_set_mode(request: LlmModeRequest, current_user: UserRecord = Depen
         config.llm.cloud_api_key = request.cloud_api_key.strip()
         updates["SUBAI_LLM_CLOUD_API_KEY"] = config.llm.cloud_api_key
 
+    config.llm.mode = mode
     if mode in ("cloud", "hybrid"):
         url, _model, key = config.get_llm_endpoint()
         if not url:
@@ -2032,7 +2033,6 @@ async def llm_set_mode(request: LlmModeRequest, current_user: UserRecord = Depen
         if not key:
             raise HTTPException(status_code=400, detail="云端模式需要配置 API Key（cloud_api_key）")
 
-    config.llm.mode = mode
     try:
         persist_env(updates)
     except Exception as e:  # noqa: BLE001
