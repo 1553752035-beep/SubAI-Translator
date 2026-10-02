@@ -252,7 +252,7 @@ export default function App() {
       : '9.2 / 32 GB';
   const gpuText =
     systemInfo.gpu_total_gb > 0
-      ? `${systemInfo.gpu_used_gb.toFixed(1)} / ${systemInfo.gpu_total_gb.toFixed(1)} GB`
+      ? `${(systemInfo.gpu_used_gb > 200 ? systemInfo.gpu_used_gb / 1024 : systemInfo.gpu_used_gb).toFixed(1)} / ${(systemInfo.gpu_total_gb > 200 ? systemInfo.gpu_total_gb / 1024 : systemInfo.gpu_total_gb).toFixed(1)} GB`
       : '2.1 / 8 GB';
 
   if (!authChecked) {
@@ -303,8 +303,8 @@ export default function App() {
         </div>
         <div className="spacer" />
         <div className="user-chip">
-          <span>{user.username}</span>
-          {user.role === 'admin' && <em>管理员</em>}
+          <span>{requireLogin ? user.username : "本机用户"}</span>
+          {requireLogin && user.role === 'admin' && <em>管理员</em>}
           <button
             className="win-btn"
             title="退出登录"
