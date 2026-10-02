@@ -139,3 +139,40 @@ POST /api/plugins/{id}/enable|disable # 启停（仅管理员）
   **远端安装/更新尚未实现**，接口里不会假装能联网下载。
 - 翻译类插件已通过注册表暴露能力，但 `pipeline` 的翻译实现仍是 `_call_llm`
   （避免 pipeline 与 plugins 循环依赖）；OCR 与 TTS 已由接缝真实取用。
+
+---
+
+## 9. 从插件市场安装（四期深化）
+
+插件目录下的 `marketplace.json` 是**本地索引**，条目格式：
+
+```json
+[
+  {
+    "id": "acme.ocr.demo",
+    "name": "acme-demo-plugin",
+    "kind": "ocr",
+    "version": "1.0.0",
+    "description": "演示插件",
+    "author": "ACME",
+    "download_url": "https://example.com/acme-demo-plugin.zip",
+    "sha256": "…64 位十六进制…"
+  }
+]
+```
+
+安装接口：`POST /api/plugins/marketplace/install`，body `{"id": "acme.ocr.demo", "confirm": true}`。
+
+**四道安全闸（缺一不可）**：
+
+1. **必须有 sha256**：条目缺 `download_url` 或 `sha256` 一律拒绝 —— 不做"无校验安装"；
+2. **必须显式确认**：`confirm=false` 直接 400；
+3. **体积双限**：下载 ≤ `SUBAI_PLUGIN_MAX_DOWNLOAD_MB`（默认 64），解压后 ≤ `SUBAI_PLUGIN_MAX_UNPACK_MB`（默认 256）；
+4. **防目录穿越**：压缩包内出现绝对路径或 `..` 直接拒绝；目标目录已存在也不覆盖。
+
+**安装 ≠ 启用**：安装器会把清单里的 `enabled_by_default` **强制改写为 false**，
+所以新装插件一定是"已安装但未启用"，必须由你在插件页确认后手动启用 ——
+这样"下载"和"执行"是两步，不会出现"下载即执行"。
+
+> 若确实需要从远端发布插件，请把 zip 放到 HTTPS 上，并把 sha256 写进索引；
+> 索引本身仍由你自己维护（本项目不自带远端仓库）。

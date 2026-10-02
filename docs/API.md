@@ -178,3 +178,72 @@ console.log(result.translations);
 - 开放 API 目前提供**翻译 / 语言清单 / 任务查询**三件事；上传视频建任务仍走主接口（需要登录态）。
 - 未实现按密钥的独立限流（沿用全局限流中间件）；密钥维度的**用量统计**已提供。
 - Webhook 只做 at-least-once 语义下的有限重试，**没有持久队列**：进程退出时未投递完的会留在 `pending`。
+
+---
+
+## 8. 用密钥创建任务（四期深化）
+
+`POST /api/open/v1/transcode`（multipart/form-data，需 `transcode` 权限）
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `file` | 是 | 视频文件（mp4/mkv/avi/mov/wmv/flv/webm/m4v/ts）|
+| `target_lang` | 是 | 目标语言（代码或名称）|
+| `mode` | 否 | `asr`（默认）或 `hardsub` |
+| `source_lang` | 否 | 源语言 |
+| `output_format` | 否 | `srt`（默认）/`vtt`/`ass`/`json` |
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/open/v1/transcode \
+  -H "X-API-Key: subai_xxx" \
+  -F "file=@demo.mp4" -F "target_lang=English" -F "mode=asr"
+```
+
+返回：
+
+```json
+{"task_id": "ab12cd34_demo", "status": "pending", "size_bytes": 1048576,
+ "mode": "asr", "target_lang": "English",
+ "quota": {"daily_limit": 20, "used_today": 1}}
+```
+
+再用 `GET /api/open/v1/tasks/{task_id}` 查进度与产物。
+
+---
+
+## 9. 限流与配额（四期深化）
+
+| 维度 | 默认 | 说明 |
+|---|---|---|
+| 请求频率 | **120 次 / 60 秒 / 密钥** | 可在创建密钥时指定，或用管理接口调整；**0 = 不限** |
+| 每日任务数 | **20 个 / 天 / 密钥** | `SUBAI_OPENAPI_KEY_DAILY_TASKS`，0 = 不限 |
+| 上传体积 | 沿用全局 `SUBAI_QUOTA_MAX_UPLOAD_MB` | 超限返回 413 |
+
+被限流时返回 **429**，并带这些头：
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+X-RateLimit-Limit: 120
+X-RateLimit-Remaining: 0
+```
+
+当前余量可随时查 `GET /api/open/v1/me`（返回 `rate_limit.limit / window_seconds / remaining`，
+`remaining = -1` 表示不限流）。被限流的请求**也会计入该密钥的错误数**，便于发现滥用。
+
+管理接口：`POST /api/openapi/keys/{id}/rate-limit`，body `{"rate_limit": 60}`（0=不限，null=用默认）。
+
+> 说明：限流是**进程内存态**（滑动窗口），多实例部署时各自计数 —— 需要全局一致时请换 Redis。
+
+---
+
+## 10. Webhook 的持久化兜底（四期深化）
+
+投递记录会落库，因此**进程被强杀也不会丢**：
+
+- **启动时**自动重投上次未完成的 `pending` 记录；
+- **运行中**每 60 秒巡检一次，把卡住的 `pending` 重新投递；
+- **重试预算跨重启累计**（不会因为重启就白送次数）；
+- 运维可手动重投单条：`POST /api/openapi/webhooks/deliveries/{delivery_id}/retry`；
+- `GET /api/openapi/stats` 里的 `webhooks.stale_pending` 表示"超过 2 分钟仍未投完"的条数，
+  正常应为 0。

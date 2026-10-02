@@ -246,7 +246,12 @@ class WebhookManager:
         max_attempts = max(1, int(config.openapi.webhook_max_attempts))
         timeout = float(config.openapi.webhook_timeout)
         backoff = float(config.openapi.webhook_backoff)
-        attempts = 0
+        # 重试预算跨重启累计：续投时从库里已有的 attempts 继续，避免"每次重启都重来 4 次"
+        attempts = int(row["attempts"] or 0)
+        if attempts >= max_attempts:
+            await self._finish(delivery_id, "failed", attempts, 0, "重试次数已用尽")
+            return {"delivery_id": delivery_id, "status": "failed", "attempts": attempts,
+                    "error": "重试次数已用尽"}
         last_error = ""
         last_status = 0
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -333,16 +338,75 @@ class WebhookManager:
         pending = counts.get("pending", 0)
         finished = success + failed
         hooks = await self.list()
+        stale_cutoff = time.time() - 120.0
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM webhook_deliveries WHERE status = 'pending' AND created_at <= ?",
+                (stale_cutoff,),
+            ) as cur:
+                stale = (await cur.fetchone())[0]
         return {
             "webhooks": len(hooks),
             "enabled": sum(1 for h in hooks if h.enabled),
             "deliveries": sum(counts.values()),
+            "stale_pending": stale,
             "success": success,
             "failed": failed,
             "pending": pending,
             "success_rate": round(success / finished, 4) if finished else 1.0,
             "by_event": by_event,
         }
+
+    # ---------------------------------------------------------------- 持久化兜底
+    async def resume_pending(self, older_than: float = 30.0, limit: int = 100) -> int:
+        """重新投递"上次进程没投完"的记录（四期深化：Webhook 持久化兜底）。
+
+        只挑 status=pending、且创建时间早于 older_than 的记录，避免和正在投递的抢。
+        """
+        await self._ensure()
+        cutoff = time.time() - max(0.0, older_than)
+        max_attempts = max(1, int(config.openapi.webhook_max_attempts))
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT d.delivery_id, d.attempts FROM webhook_deliveries d"
+                " JOIN webhooks w ON w.webhook_id = d.webhook_id"
+                " WHERE d.status = 'pending' AND d.created_at <= ? AND w.enabled = 1"
+                " AND d.attempts < ? ORDER BY d.created_at ASC LIMIT ?",
+                (cutoff, max_attempts, int(limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        for row in rows:
+            task = asyncio.create_task(self.deliver(row["delivery_id"]))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        if rows:
+            logger.info("重新投递 %d 条未完成的 Webhook", len(rows))
+        return len(rows)
+
+    async def retry_delivery(self, delivery_id: str) -> dict:
+        """手动重投一条记录（管理员排障用）：把状态改回 pending 并立即投递。"""
+        await self._ensure()
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute(
+                "UPDATE webhook_deliveries SET status = 'pending', attempts = 0,"
+                " error = '' WHERE delivery_id = ?", (delivery_id,),
+            )
+            await db.commit()
+        if not cur.rowcount:
+            raise KeyError(delivery_id)
+        return await self.deliver(delivery_id)
+
+    async def sweep_loop(self, interval: float = 60.0) -> None:
+        """后台巡检：定期把卡住的 pending 重新投递（进程被强杀后的兜底）。"""
+        while True:
+            await asyncio.sleep(max(5.0, float(interval)))
+            try:
+                await self.resume_pending(older_than=max(5.0, float(interval)) + 30.0)
+            except asyncio.CancelledError:  # pragma: no cover - 关闭时正常退出
+                raise
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Webhook 巡检异常（忽略并继续）: %r", e)
 
     async def wait_pending(self, timeout: float = 30.0) -> None:
         """等待所有后台投递结束（测试与优雅关闭用）。"""

@@ -119,6 +119,48 @@ class SubAIClient:
         """查询任务状态与产物。"""
         return self._request("GET", "/api/open/v1/tasks/%s" % urllib.parse.quote(str(task_id)))
 
+    def transcode(self, file_path: str, target_lang: str, mode: str = "asr",
+                  source_lang: Optional[str] = None, output_format: str = "srt") -> dict:
+        """用 API 密钥创建转码任务（multipart 上传，需 transcode 权限）。"""
+        import os as _os
+        import uuid as _uuid
+
+        if not _os.path.isfile(file_path):
+            raise FileNotFoundError(file_path)
+        boundary = "----SubAIBoundary" + _uuid.uuid4().hex
+        fields = {"target_lang": target_lang, "mode": mode, "output_format": output_format}
+        if source_lang:
+            fields["source_lang"] = source_lang
+        chunks: list = []
+        for key, value in fields.items():
+            chunks.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
+                           % (boundary, key, value)).encode("utf-8"))
+        with open(file_path, "rb") as f:
+            data = f.read()
+        filename = _os.path.basename(file_path)
+        chunks.append(("--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+                       "Content-Type: application/octet-stream\r\n\r\n" % (boundary, filename)).encode("utf-8"))
+        chunks.append(data)
+        chunks.append(("\r\n--%s--\r\n" % boundary).encode("utf-8"))
+        body = b"".join(chunks)
+
+        headers = {"Content-Type": "multipart/form-data; boundary=%s" % boundary,
+                   "Accept": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        if self.token:
+            headers["Authorization"] = "Bearer %s" % self.token
+        req = urllib.request.Request(self.base_url + "/api/open/v1/transcode",
+                                     data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw.decode("utf-8")) if raw else None
+        except urllib.error.HTTPError as e:
+            raise SubAIError(e.code, e.read().decode("utf-8", "replace"))
+        except urllib.error.URLError as e:
+            raise SubAIError(0, "无法连接 %s: %s" % (self.base_url, e.reason))
+
     # ------------------------------------------------------------------ 管理 API
     def create_api_key(self, name: str, scopes=None) -> dict:
         """创建密钥；返回里含明文 secret（只出现这一次）。"""
@@ -139,6 +181,16 @@ class SubAIClient:
     def webhook_deliveries(self, webhook_id: str, limit: int = 50) -> dict:
         return self._request("GET", "/api/openapi/webhooks/%s/deliveries" % urllib.parse.quote(str(webhook_id)),
                              params={"limit": limit})
+
+    def set_rate_limit(self, key_id: str, rate_limit: Optional[int]) -> dict:
+        """设置密钥限流上限（0=不限，None=用默认）。"""
+        return self._request("POST", "/api/openapi/keys/%s/rate-limit" % urllib.parse.quote(str(key_id)),
+                             {"rate_limit": rate_limit})
+
+    def retry_delivery(self, delivery_id: str) -> dict:
+        """手动重投一条 Webhook 投递记录。"""
+        return self._request("POST", "/api/openapi/webhooks/deliveries/%s/retry"
+                             % urllib.parse.quote(str(delivery_id)))
 
     def stats(self) -> dict:
         return self._request("GET", "/api/openapi/stats")

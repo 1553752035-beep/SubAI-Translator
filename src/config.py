@@ -324,6 +324,9 @@ class OpenAPIConfig(BaseSettings):
     enabled: bool = Field(default=True, description="是否启用开放平台（密钥与 Webhook）")
     key_prefix: str = Field(default="subai_", description="API 密钥前缀（便于识别与日志脱敏）")
     key_bytes: int = Field(default=24, description="密钥随机字节数")
+    key_rate_limit: int = Field(default=120, description="每个密钥的默认限流（窗口内请求数，0=不限）")
+    key_rate_window: float = Field(default=60.0, description="密钥限流窗口（秒）")
+    key_daily_tasks: int = Field(default=20, description="每个密钥每天允许创建的转码任务数（0=不限）")
     webhook_max_attempts: int = Field(default=4, description="Webhook 最大投递次数（含首次）")
     webhook_timeout: float = Field(default=10.0, description="单次 Webhook 请求超时（秒）")
     webhook_backoff: float = Field(default=1.0, description="退避基数（秒），第 n 次重试等待 n*backoff")
@@ -338,6 +341,8 @@ class PluginConfig(BaseSettings):
     autoload: bool = Field(default=True, description="启动时自动加载已启用的插件")
     dir: str = Field(default="", description="外部插件目录（留空用 <root>/plugins）")
     allow_external: bool = Field(default=True, description="是否允许加载外部插件（其代码会被执行）")
+    max_download_mb: int = Field(default=64, description="市场安装时单个插件包的最大下载体积（MB）")
+    max_unpack_mb: int = Field(default=256, description="市场安装时解压后的最大体积（MB）")
 
 
 class SubAIConfig(BaseSettings):

@@ -40,8 +40,12 @@ export class SubAIClient {
     const headers = { Accept: "application/json" };
     const init = { method, headers };
     if (payload !== undefined && payload !== null) {
-      headers["Content-Type"] = "application/json; charset=utf-8";
-      init.body = JSON.stringify(payload);
+      if (typeof FormData !== "undefined" && payload instanceof FormData) {
+        init.body = payload;          // 让浏览器/Node 自己带 boundary
+      } else {
+        headers["Content-Type"] = "application/json; charset=utf-8";
+        init.body = JSON.stringify(payload);
+      }
     }
     if (this.apiKey) headers["X-API-Key"] = this.apiKey;
     if (this.token) headers.Authorization = "Bearer " + this.token;
@@ -67,6 +71,18 @@ export class SubAIClient {
   }
   task(taskId) { return this.request("GET", "/api/open/v1/tasks/" + encodeURIComponent(taskId)); }
 
+  /** 用 API 密钥创建转码任务（file 可为 File / Blob / Buffer 包装的 Blob）。 */
+  transcode(file, targetLang, opts = {}) {
+    if (typeof FormData === "undefined") throw new Error("当前环境不支持 FormData");
+    const form = new FormData();
+    form.append("file", file);
+    form.append("target_lang", targetLang);
+    form.append("mode", opts.mode || "asr");
+    form.append("output_format", opts.outputFormat || "srt");
+    if (opts.sourceLang) form.append("source_lang", opts.sourceLang);
+    return this.request("POST", "/api/open/v1/transcode", form);
+  }
+
   // ---- 管理 API ----
   createApiKey(name, scopes) { return this.request("POST", "/api/openapi/keys", { name, scopes }); }
   listApiKeys() { return this.request("GET", "/api/openapi/keys"); }
@@ -75,6 +91,14 @@ export class SubAIClient {
   testWebhook(id) { return this.request("POST", "/api/openapi/webhooks/" + encodeURIComponent(id) + "/test"); }
   webhookDeliveries(id, limit = 50) {
     return this.request("GET", "/api/openapi/webhooks/" + encodeURIComponent(id) + "/deliveries", null, { limit });
+  }
+  setRateLimit(keyId, rateLimit) {
+    return this.request("POST", "/api/openapi/keys/" + encodeURIComponent(keyId) + "/rate-limit",
+      { rate_limit: rateLimit });
+  }
+  retryDelivery(deliveryId) {
+    return this.request("POST",
+      "/api/openapi/webhooks/deliveries/" + encodeURIComponent(deliveryId) + "/retry");
   }
   stats() { return this.request("GET", "/api/openapi/stats"); }
 }

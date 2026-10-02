@@ -41,8 +41,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, {"detail": "任务不存在"})
 
     def do_POST(self):  # noqa: N802
+        # 先一次性读完 body；multipart 与 JSON 都在这里分流，避免"读两次读了空"
         length = int(self.headers.get("Content-Length") or 0)
-        payload = json.loads(self.rfile.read(length) or b"{}")
+        raw_body = self.rfile.read(length) or b""
+        if self.path == "/api/open/v1/transcode":
+            raw = raw_body.decode("utf-8", "replace")
+            ok = ('name="file"' in raw) and ('name="target_lang"' in raw) and ("demo.mp4" in raw)
+            self._send(200, {"task_id": "t_demo" if ok else "", "status": "pending",
+                             "size_bytes": len(raw_body),
+                             "quota": {"daily_limit": 20, "used_today": 1}})
+            return
+        payload = json.loads(raw_body or b"{}")
         if self.path == "/api/open/v1/translate":
             texts = payload.get("texts") or []
             self._send(200, {"translations": ["T:" + t for t in texts],
@@ -109,3 +118,17 @@ class TestPythonSdk:
         assert verify_webhook(secret, body, "bad") is False
         assert verify_webhook("other", body, sig) is False
         assert verify_webhook(secret, body, "") is False
+
+class TestPythonSdkTranscode:
+    def test_transcode_builds_multipart(self, server, tmp_path):
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(b"fake-video-bytes")
+        client = SubAIClient(server, api_key="subai_test")
+        r = client.transcode(str(video), "English")
+        assert r["task_id"] == "t_demo"          # 服务端确认收到了 file/target_lang 字段
+        assert r["quota"]["used_today"] == 1
+
+    def test_transcode_missing_file(self, server):
+        client = SubAIClient(server, api_key="subai_test")
+        with pytest.raises(FileNotFoundError):
+            client.transcode("/no/such/file.mp4", "English")

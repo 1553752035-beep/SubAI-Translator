@@ -38,10 +38,12 @@ import os
 import shutil
 import uuid
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, UploadFile
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
+                     UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -63,9 +65,11 @@ from src import llm as llm_module
 from src import languages as languages_module
 from src import analytics as analytics_module
 from src.openapi.keys import ApiKey, get_api_key_manager
+from src.openapi.ratelimit import get_key_limiter
 from src.openapi.webhook import EVENTS as WEBHOOK_EVENTS, get_webhook_manager
 from src.plugins import init_plugins
 from src.plugins import registry as plugin_registry
+from src.plugins.installer import InstallError, install_from_entry
 from src.plugins.manifest import VALID_KINDS as PLUGIN_KINDS
 from src.subtitles import load_task_segments, save_task_segments
 from src.logging_config import setup_logging
@@ -207,6 +211,12 @@ class ApiKeyCreateRequest(BaseModel):
     """创建 API 密钥（四期 4.5）。"""
     name: str = Field(..., description="密钥名称，便于识别用途")
     scopes: Optional[list] = Field(default=None, description="权限范围，默认 translate/tasks/languages")
+    rate_limit: Optional[int] = Field(default=None, description="该密钥的限流上限；0=不限；null=用默认")
+
+
+class ApiKeyRateLimitRequest(BaseModel):
+    """设置单个密钥的限流（四期深化）。"""
+    rate_limit: Optional[int] = Field(default=None, description="窗口内请求数上限；0=不限；null=用默认")
 
 
 class WebhookCreateRequest(BaseModel):
@@ -269,6 +279,7 @@ backup_manager_obj: Optional[AsyncBackupManager] = None
 auto_backup_task: Optional[asyncio.Task] = None
 alert_manager_obj: Optional[AlertManager] = None
 alert_loop_task: Optional[asyncio.Task] = None
+webhook_sweep_task: Optional[asyncio.Task] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -349,7 +360,7 @@ async def lifespan(app: FastAPI):
     # 启动时初始化
     logger.info("正在启动SubAI Translator API服务...")
     
-    global task_manager, task_queue_obj, translation_cache_obj, user_manager_obj, terminology_manager_obj, backup_manager_obj, auto_backup_task, alert_manager_obj, alert_loop_task
+    global task_manager, task_queue_obj, translation_cache_obj, user_manager_obj, terminology_manager_obj, backup_manager_obj, auto_backup_task, alert_manager_obj, alert_loop_task, webhook_sweep_task
 
     # 初始化任务管理器
     task_manager = await get_task_manager()
@@ -406,6 +417,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         logger.warning(f"插件系统初始化失败（不影响主流程）: {e!r}")
 
+    # 四期深化：Webhook 持久化兜底 —— 重投上次没投完的，并启动巡检
+    try:
+        resumed = await get_webhook_manager().resume_pending(older_than=30.0)
+        if resumed:
+            logger.info(f"已重新投递 {resumed} 条未完成的 Webhook")
+        webhook_sweep_task = asyncio.create_task(get_webhook_manager().sweep_loop())
+        logger.info("Webhook 巡检已启动")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Webhook 恢复失败（不影响主流程）: {e!r}")
+
     logger.info("API服务启动完成")
     
     yield
@@ -416,6 +437,8 @@ async def lifespan(app: FastAPI):
         auto_backup_task.cancel()
     if alert_loop_task:
         alert_loop_task.cancel()
+    if webhook_sweep_task:
+        webhook_sweep_task.cancel()
     if task_queue_obj:
         await task_queue_obj.shutdown()
     if task_manager:
@@ -1846,7 +1869,8 @@ async def create_api_key(request: ApiKeyCreateRequest,
     """创建 API 密钥。**明文只在这次响应里出现一次**，请立即保存。"""
     manager = get_api_key_manager()
     secret, key = await manager.create(request.name, scopes=request.scopes,
-                                       user_id=current_user.username)
+                                       user_id=current_user.username,
+                                       rate_limit=request.rate_limit)
     await get_webhook_manager().dispatch("key.created", {
         "key_id": key.key_id, "name": key.name, "created_by": current_user.username,
     })
@@ -1873,6 +1897,16 @@ async def revoke_api_key(key_id: str, current_user: UserRecord = Depends(get_cur
     if not await get_api_key_manager().revoke(key_id):
         raise HTTPException(status_code=404, detail="密钥不存在: %s" % key_id)
     return {"key_id": key_id, "revoked": True}
+
+
+@app.post("/api/openapi/keys/{key_id}/rate-limit")
+async def set_api_key_rate_limit(key_id: str, request: ApiKeyRateLimitRequest,
+                                 current_user: UserRecord = Depends(get_current_admin)):
+    """设置单个密钥的限流上限；0=不限，null=恢复默认。"""
+    if not await get_api_key_manager().set_rate_limit(key_id, request.rate_limit):
+        raise HTTPException(status_code=404, detail="密钥不存在: %s" % key_id)
+    get_key_limiter().reset(key_id)   # 改了上限就清空窗口，避免旧计数干扰
+    return {"key_id": key_id, "rate_limit": request.rate_limit}
 
 
 @app.get("/api/openapi/usage")
@@ -1937,6 +1971,16 @@ async def test_webhook(webhook_id: str, current_user: UserRecord = Depends(get_c
     return {"webhook_id": webhook_id, "deliveries": deliveries}
 
 
+@app.post("/api/openapi/webhooks/deliveries/{delivery_id}/retry")
+async def retry_webhook_delivery(delivery_id: str,
+                                 current_user: UserRecord = Depends(get_current_admin)):
+    """手动重投一条投递记录（排障用）：状态改回 pending 并立即重投。"""
+    try:
+        return await get_webhook_manager().retry_delivery(delivery_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="投递记录不存在: %s" % delivery_id)
+
+
 @app.get("/api/openapi/webhooks/{webhook_id}/deliveries")
 async def webhook_deliveries(webhook_id: str, limit: int = 50,
                              current_user: UserRecord = Depends(get_current_admin)):
@@ -1963,6 +2007,21 @@ async def require_api_key(
     key = await get_api_key_manager().verify(token)
     if key is None:
         raise HTTPException(status_code=401, detail="API 密钥无效或已吊销")
+
+    # 四期深化：按密钥限流（0=不限）。被限流也计入该密钥的错误数，便于排查滥用。
+    limiter = get_key_limiter()
+    if not limiter.allow(key.key_id, key.rate_limit):
+        await get_api_key_manager().record_call(key.key_id, ok=False)
+        effective = limiter.effective_limit(key.rate_limit)
+        raise HTTPException(
+            status_code=429,
+            detail="请求过于频繁：该密钥上限 %d 次 / %d 秒" % (effective, int(limiter.window)),
+            headers={
+                "Retry-After": str(max(1, int(limiter.window))),
+                "X-RateLimit-Limit": str(effective),
+                "X-RateLimit-Remaining": "0",
+            },
+        )
     return key
 
 
@@ -1974,8 +2033,18 @@ def _check_scope(key: ApiKey, scope: str) -> None:
 
 @app.get("/api/open/v1/me")
 async def open_me(key: ApiKey = Depends(require_api_key)):
-    """当前密钥信息与用量。"""
-    return {"key": key.to_dict(), "events": list(WEBHOOK_EVENTS)}
+    """当前密钥信息、用量与限流余量。"""
+    limiter = get_key_limiter()
+    await get_api_key_manager().record_call(key.key_id, ok=True)
+    return {
+        "key": key.to_dict(),
+        "events": list(WEBHOOK_EVENTS),
+        "rate_limit": {
+            "limit": limiter.effective_limit(key.rate_limit),
+            "window_seconds": limiter.window,
+            "remaining": limiter.remaining(key.key_id, key.rate_limit),
+        },
+    }
 
 
 @app.get("/api/open/v1/languages")
@@ -2006,6 +2075,95 @@ async def open_translate(request: OpenTranslateRequest, key: ApiKey = Depends(re
     except Exception as e:  # noqa: BLE001
         await manager.record_call(key.key_id, ok=False)
         raise HTTPException(status_code=502, detail="翻译失败: %r" % (e,))
+
+
+@app.post("/api/open/v1/transcode")
+async def open_transcode(
+    file: UploadFile = File(..., description="视频文件"),
+    mode: str = Form("asr", description="识别模式 asr|hardsub"),
+    target_lang: str = Form(..., description="目标语言"),
+    source_lang: Optional[str] = Form(None, description="源语言（可省略）"),
+    output_format: str = Form("srt", description="输出格式 srt|vtt|ass|json"),
+    key: ApiKey = Depends(require_api_key),
+):
+    """用 API 密钥创建转码任务（multipart 上传）。
+
+    与主接口的区别只有两点：鉴权换成 API 密钥、按密钥计每日配额；
+    提交任务走的仍是同一套内部函数，因此行为完全一致。
+    """
+    _check_scope(key, "transcode")
+    manager = get_api_key_manager()
+
+    limit = int(config.openapi.key_daily_tasks)
+    if limit > 0:
+        used = await manager.tasks_today(key.key_id)
+        if used >= limit:
+            await manager.record_call(key.key_id, ok=False)
+            raise HTTPException(status_code=429,
+                                detail="已达该密钥的每日任务上限（%d 个/天）" % limit)
+
+    allowed_exts = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts"}
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    if ext not in allowed_exts:
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=400, detail="不支持的文件类型: %s" % (ext or "未知"))
+
+    uploads_dir = config.uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
+    dest = os.path.join(uploads_dir, "%s_%s" % (uuid.uuid4().hex[:12], Path(filename).name))
+    max_bytes = config.quota.max_upload_mb * 1024 * 1024
+    total = 0
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if config.quota.enabled and total > max_bytes:
+                    raise HTTPException(status_code=413,
+                                        detail="上传文件超过大小上限（%dMB）" % config.quota.max_upload_mb)
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(dest):
+            os.remove(dest)
+        await manager.record_call(key.key_id, ok=False)
+        raise
+    except Exception:
+        if os.path.exists(dest):
+            os.remove(dest)
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=500, detail="文件保存失败")
+    finally:
+        await file.close()
+
+    class _ApiPrincipal:
+        """最小主体对象：任务归该密钥所属用户，权限按普通用户（因此受上传配额约束）。"""
+
+        def __init__(self, user_id: str) -> None:
+            self.user_id = user_id
+            self.role = "user"
+
+    item = SimpleNamespace(
+        video_path=dest, mode=mode, source_lang=source_lang, target_lang=target_lang,
+        output_format=output_format, terms_file=None, priority=0,
+    )
+    principal = _ApiPrincipal(key.user_id or ("apikey:" + key.key_id))
+    try:
+        result = await _submit_one_transcode(item, principal)
+    except Exception as e:  # noqa: BLE001
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=502, detail="创建任务失败: %r" % (e,))
+    if result.get("error"):
+        await manager.record_call(key.key_id, ok=False)
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    await manager.record_task(key.key_id)
+    await manager.record_call(key.key_id, ok=True)
+    return {"task_id": result["task_id"], "status": result["status"],
+            "size_bytes": total, "mode": mode, "target_lang": target_lang,
+            "quota": {"daily_limit": limit, "used_today": await manager.tasks_today(key.key_id)}}
 
 
 @app.get("/api/open/v1/tasks/{task_id}")
@@ -2084,6 +2242,30 @@ async def plugin_marketplace(query: Optional[str] = None, kind: Optional[str] = 
 async def get_plugin(plugin_id: str, current_user: UserRecord = Depends(get_current_user)):
     """单个插件详情（含能力与可用性）。"""
     return _require_plugin(plugin_id).to_dict(detail=True)
+
+
+class PluginInstallRequest(BaseModel):
+    """从市场索引安装插件（四期深化）。"""
+    id: str = Field(..., description="市场条目 id")
+    confirm: bool = Field(default=False, description="必须为 true：安装的插件代码会在启用后执行")
+
+
+@app.post("/api/plugins/marketplace/install")
+async def install_plugin(request: PluginInstallRequest,
+                         current_user: UserRecord = Depends(get_current_admin)):
+    """从本地市场索引安装插件（需 sha256 校验 + 显式确认；安装后不会自动启用）。"""
+    if not config.plugins.allow_external:
+        raise HTTPException(status_code=400, detail="外部插件加载已禁用（SUBAI_PLUGIN_ALLOW_EXTERNAL=false）")
+    entries = plugin_registry.marketplace()
+    entry = next((e for e in entries if str(e.get("id")) == request.id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="市场条目不存在: %s" % request.id)
+    try:
+        result = await install_from_entry(entry, plugin_registry.plugins_dir, confirm=request.confirm)
+    except InstallError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result["discovered"] = plugin_registry.reload()
+    return result
 
 
 @app.post("/api/plugins/reload")

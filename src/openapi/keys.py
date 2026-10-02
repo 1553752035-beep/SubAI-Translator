@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at REAL,
     enabled INTEGER DEFAULT 1,
     call_count INTEGER DEFAULT 0,
-    error_count INTEGER DEFAULT 0
+    error_count INTEGER DEFAULT 0,
+    rate_limit INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS api_key_daily (
     day TEXT NOT NULL,
     calls INTEGER DEFAULT 0,
     errors INTEGER DEFAULT 0,
+    tasks INTEGER DEFAULT 0,
     PRIMARY KEY (key_id, day)
 );
 """
@@ -72,6 +74,7 @@ class ApiKey:
     enabled: bool
     call_count: int
     error_count: int
+    rate_limit: Optional[int] = None
 
     @property
     def success_rate(self) -> float:
@@ -92,6 +95,7 @@ class ApiKey:
             "call_count": self.call_count,
             "error_count": self.error_count,
             "success_rate": self.success_rate,
+            "rate_limit": self.rate_limit,
         }
 
 
@@ -110,18 +114,28 @@ class ApiKeyManager:
             os.makedirs(parent, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(SCHEMA)
+            # 迁移：旧库补 rate_limit 列（四期深化：按密钥限流）
+            async with db.execute("PRAGMA table_info(api_keys)") as cur:
+                columns = [row[1] for row in await cur.fetchall()]
+            if "rate_limit" not in columns:
+                await db.execute("ALTER TABLE api_keys ADD COLUMN rate_limit INTEGER")
+            async with db.execute("PRAGMA table_info(api_key_daily)") as cur:
+                daily_columns = [row[1] for row in await cur.fetchall()]
+            if "tasks" not in daily_columns:
+                await db.execute("ALTER TABLE api_key_daily ADD COLUMN tasks INTEGER DEFAULT 0")
             await db.commit()
         self._ready = True
 
     async def create(self, name: str, scopes: Optional[list] = None,
-                     user_id: Optional[str] = None) -> tuple:
+                     user_id: Optional[str] = None,
+                     rate_limit: Optional[int] = None) -> tuple:
         """创建密钥，返回 (明文密钥, ApiKey)。明文只在这里出现一次。"""
         await self._ensure()
         raw = secrets.token_urlsafe(int(config.openapi.key_bytes))
         secret = "%s%s" % (config.openapi.key_prefix, raw)
         key_id = "key_" + uuid.uuid4().hex[:12]
         now = time.time()
-        scopes = list(scopes or ["translate", "tasks", "languages"])
+        scopes = list(scopes or ["translate", "tasks", "languages", "transcode"])
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO api_keys (key_id, name, prefix, key_hash, scopes, user_id, created_at, enabled)"
@@ -130,8 +144,14 @@ class ApiKeyManager:
                  json.dumps(scopes, ensure_ascii=False), user_id, now),
             )
             await db.commit()
+        if rate_limit is not None:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("UPDATE api_keys SET rate_limit = ? WHERE key_id = ?",
+                                 (int(rate_limit), key_id))
+                await db.commit()
         return secret, ApiKey(key_id, name, secret[: len(config.openapi.key_prefix) + 8],
-                              scopes, user_id, now, None, True, 0, 0)
+                              scopes, user_id, now, None, True, 0, 0,
+                              int(rate_limit) if rate_limit is not None else None)
 
     async def verify(self, token: str) -> Optional[ApiKey]:
         """校验密钥；命中则返回记录（不修改统计，由 record_call 负责）。"""
@@ -165,6 +185,27 @@ class ApiKeyManager:
             )
             await db.commit()
 
+    async def record_task(self, key_id: str) -> None:
+        """记录该密钥今天创建了一个转码任务（四期深化：配额计数）。"""
+        await self._ensure()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO api_key_daily (key_id, day, calls, errors, tasks) VALUES (?, ?, 0, 0, 1)"
+                " ON CONFLICT(key_id, day) DO UPDATE SET tasks = tasks + 1",
+                (key_id, _today()),
+            )
+            await db.commit()
+
+    async def tasks_today(self, key_id: str) -> int:
+        await self._ensure()
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT tasks FROM api_key_daily WHERE key_id = ? AND day = ?",
+                (key_id, _today()),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
     async def list(self) -> list:
         await self._ensure()
         async with aiosqlite.connect(self.db_path) as db:
@@ -186,6 +227,15 @@ class ApiKeyManager:
         async with aiosqlite.connect(self.db_path) as db:
             cur = await db.execute("UPDATE api_keys SET enabled = ? WHERE key_id = ?",
                                    (1 if enabled else 0, key_id))
+            await db.commit()
+        return bool(cur.rowcount)
+
+    async def set_rate_limit(self, key_id: str, rate_limit: Optional[int]) -> bool:
+        """设置单个密钥的限流上限（None/0 表示用默认/不限）。"""
+        await self._ensure()
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute("UPDATE api_keys SET rate_limit = ? WHERE key_id = ?",
+                                   (None if rate_limit is None else int(rate_limit), key_id))
             await db.commit()
         return bool(cur.rowcount)
 
@@ -234,6 +284,7 @@ class ApiKeyManager:
         except Exception:  # noqa: BLE001
             scopes = []
         return ApiKey(
+            rate_limit=(row["rate_limit"] if "rate_limit" in row.keys() else None),
             key_id=row["key_id"],
             name=row["name"],
             prefix=row["prefix"],
