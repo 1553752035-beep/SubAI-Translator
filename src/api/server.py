@@ -2151,6 +2151,19 @@ async def get_task_subtitles(task_id: str, current_user: UserRecord = Depends(ge
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
     data = load_task_segments(task.result_files or [])
+
+    # 五期：合并同名词边界 sidecar（确认页拆分功能用它吸附词边界）
+    try:
+        import json as _json
+        _f = (data or {}).get("file") or ""
+        if _f and os.path.isfile(_f + ".words.json"):
+            with open(_f + ".words.json", "r", encoding="utf-8") as _fp:
+                _w = _json.load(_fp)
+            for _i, _seg in enumerate(data.get("segments") or []):
+                if _i < len(_w) and isinstance(_w[_i], dict):
+                    _seg["words"] = _w[_i].get("words") or []
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("读取词边界失败（不影响编辑）: %s", _e)
     if not data["segments"]:
         raise HTTPException(
             status_code=404,

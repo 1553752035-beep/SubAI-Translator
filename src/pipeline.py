@@ -114,7 +114,8 @@ def _regroup(segments, max_chars: int = MAX_CHARS, max_dur: float = MAX_DUR) -> 
         if not words:
             text = (seg.text or "").strip()
             if text:
-                out.append({"start": seg.start, "end": seg.end, "text": text})
+                out.append({"start": seg.start, "end": seg.end, "text": text,
+                            "words": [round(seg.start, 3), round(seg.end, 3)]})
             continue
         cur = []
         for w in words:
@@ -126,12 +127,14 @@ def _regroup(segments, max_chars: int = MAX_CHARS, max_dur: float = MAX_DUR) -> 
             tail = w.word.strip()[-1:] if w.word.strip() else ""
             if len(text) >= max_chars or dur >= max_dur or tail in BREAK_PUNCT:
                 if text:
-                    out.append({"start": cur[0].start, "end": cur[-1].end, "text": text})
+                    out.append({"start": cur[0].start, "end": cur[-1].end, "text": text,
+                                "words": [round(w.start, 3) for w in cur] + [round(cur[-1].end, 3)]})
                 cur = []
         if cur:
             text = "".join(x.word for x in cur).strip()
             if text:
-                out.append({"start": cur[0].start, "end": cur[-1].end, "text": text})
+                out.append({"start": cur[0].start, "end": cur[-1].end, "text": text,
+                            "words": [round(w.start, 3) for w in cur] + [round(cur[-1].end, 3)]})
     
     # 过短的碎片（<2字）并入上一行
     merged: list[dict] = []
@@ -653,6 +656,16 @@ def write_srt(rows: list[dict], path: str, texts: list[str]) -> None:
     log("  [输出] %s" % path)
 
 
+
+    # 五期：把词级时间戳另存一份（SRT 存不下；确认页拆分功能依赖它）
+    try:
+        import json as _json
+        with open(path + ".words.json", "w", encoding="utf-8") as _f:
+            _json.dump(
+                [{"start": r.get("start"), "end": r.get("end"), "words": r.get("words") or []} for r in rows],
+                _f, ensure_ascii=False)
+    except Exception as _e:  # noqa: BLE001
+        print("  [words] 写入失败: %s" % _e)
 def write_vtt(rows: list[dict], path: str, texts: list[str]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
