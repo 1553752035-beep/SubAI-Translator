@@ -324,7 +324,7 @@ export default function App() {
       </div>
 
       <div className="main-content">
-        <div className={'sidebar' + (navOpen ? '' : ' w-hidden')}>
+        <div className={'sidebar w-drawer' + (navOpen ? '' : ' w-hidden')}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
   <button className="w-btn w-ghost" onClick={() => { setNavOpen(false); setActiveTab("home"); }}>← 返回主界面</button>
 </div>
