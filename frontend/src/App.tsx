@@ -13,7 +13,7 @@ import { startBackend, checkBackendHealth, getSystemInfo } from './api/tauri';
 import type { SystemInfo } from './api/tauri';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LoginPage } from './pages/LoginPage';
-import { getToken, getCurrentUser, logout, getLlmStatus, setLlmMode, checkHealth, ensureLocalToken, getLocalTokenError } from './api';
+import { getToken, getCurrentUser, logout, getLlmStatus, checkHealth, ensureLocalToken, getLocalTokenError } from './api';
 import type { UserInfo, LlmStatus } from './types';
 
 type TabId = 'home' | 'tasks' | 'terms' | 'plugins' | 'openapi' | 'settings' | 'help';
@@ -66,8 +66,6 @@ export default function App() {
   const [connectTries, setConnectTries] = useState(0);
   const [connectLog, setConnectLog] = useState("");
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
-  const [llmBusy, setLlmBusy] = useState(false);
-  const [llmMsg, setLlmMsg] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -205,22 +203,6 @@ export default function App() {
     };
   }, [user]);
 
-  const switchLlmMode = async (mode: 'local' | 'cloud' | 'hybrid') => {
-    if (llmBusy || !llmStatus || llmStatus.mode === mode) return;
-    setLlmBusy(true);
-    setLlmMsg('');
-    try {
-      const s = await setLlmMode(mode);
-      setLlmStatus(s);
-      setLlmMsg('已切换到 ' + mode);
-    } catch (err: any) {
-      const detail = err && err.response ? err.response.data.detail : null;
-      setLlmMsg(typeof detail === 'string' ? detail : '切换失败');
-    } finally {
-      setLlmBusy(false);
-      setTimeout(() => setLlmMsg(''), 5000);
-    }
-  };
 
   // 翻译后端是否真的可用（决定能否提交任务）
   const llmReady = !!llmStatus && (llmStatus.mode === 'local'
@@ -339,21 +321,6 @@ export default function App() {
           <div className="divider" />
 
           <div className="mode-card">
-            <div className="label">AI 调用模式（后端为准）</div>
-            <div className="mode-toggle">
-              <div
-                className={'opt ' + (llmStatus && llmStatus.mode === 'cloud' ? 'on' : '') + (llmBusy ? ' busy' : '')}
-                onClick={() => void switchLlmMode('cloud')}
-              >
-                云端 API
-              </div>
-              <div
-                className={'opt ' + (llmStatus && llmStatus.mode === 'local' ? 'on' : '') + (llmBusy ? ' busy' : '')}
-                onClick={() => void switchLlmMode('local')}
-              >
-                本地模型
-              </div>
-            </div>
             <div className="hint">
               {llmStatus ? (
                 <>
@@ -372,7 +339,6 @@ export default function App() {
                   {llmStatus.effective.model || '-'} · {llmStatus.effective.url || '未配置端点'}
                 </>
               ) : '正在读取后端配置…'}
-              {llmMsg && (<><br /><b>{llmMsg}</b></>)}
             </div>
           </div>
         </div>
