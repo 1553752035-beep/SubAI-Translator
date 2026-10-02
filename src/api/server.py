@@ -975,6 +975,13 @@ async def process_transcode_task(
 # API路由
 # --------------------------------------------------------------------------- #
 
+@app.get("/api/term-packs")
+async def list_term_packs(current_user: UserRecord = Depends(get_current_user)):
+    """五期：常见术语包（ASR 错字纠正 + 翻译术语）。"""
+    from src import term_packs as term_packs_module
+    return {"packs": term_packs_module.list_packs()}
+
+
 @app.get("/api/llm/providers")
 async def list_llm_providers(current_user: UserRecord = Depends(get_current_user)):
     """五期：云端翻译服务商预设（前端用它渲染"选服务商 + 只填 Key"）。"""

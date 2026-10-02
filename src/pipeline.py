@@ -167,6 +167,21 @@ def asr_segments(wav: str, language: Optional[str], progress_callback: Optional[
     t_asr = time.time() - t0
 
     rows = _regroup(segs)
+
+    # 五期：按启用的术语包纠正 ASR 错字（只改文本，不动时间轴）
+    try:
+        from src.term_packs import apply_fixes
+        _fixed = 0
+        for _r in rows:
+            _t = _r.get("text") or ""
+            _new, _ap = apply_fixes(_t)
+            if _ap:
+                _r["text"] = _new
+                _fixed += len(_ap)
+        if _fixed:
+            log("  [ASR] 术语包纠正识别错字 %d 处" % _fixed)
+    except Exception as _e:  # noqa: BLE001
+        log("  [ASR] 术语包纠错跳过: %s" % _e)
     log("  [ASR] 模型加载 %.2fs / 推理 %.2fs / 语言=%s(%.2f) / 段落 %d -> 字幕行 %d"
         % (t_load, t_asr, info.language, info.language_probability, len(segs), len(rows)))
     
