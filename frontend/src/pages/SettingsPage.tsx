@@ -205,7 +205,7 @@ export function SettingsPage() {
             <Row label="翻译模式(后端)" value={health ? String(health.llm_mode) : '-'} />
             <Row label="ASR 设备" value={health ? String(health.asr_device) : '-'} />
             <Row label="队列" value={qs ? (String(qs.running_count) + ' 运行 / ' + String(qs.queue_size) + ' 等待（上限 ' + String(qs.max_queue_size) + '）') : '-'} />
-            <Row label="当前账号" value={me ? (me.username + ' / ' + me.role) : '-'} />
+            <Row label="当前账号" value={me ? '本机用户（免登录）' : '未登录'} />
           </div>
         </div>
 

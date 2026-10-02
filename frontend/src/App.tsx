@@ -303,7 +303,16 @@ export default function App() {
         </div>
         <div className="spacer" />
         <div className="user-chip">
-          <span>{requireLogin ? user.username : "本机用户"}</span>
+          {activeTab !== 'home' && (
+              <button
+                className="w-btn w-ghost"
+                style={{ marginRight: 10, padding: '5px 12px', fontSize: 13 }}
+                onClick={() => setActiveTab('home')}
+              >
+                ← 返回主界面
+              </button>
+            )}
+            <span>{requireLogin ? user.username : "本机用户"}</span>
           {requireLogin && user.role === 'admin' && <em>管理员</em>}
           <button
             className="win-btn"
@@ -324,7 +333,7 @@ export default function App() {
       </div>
 
       <div className="main-content">
-        <div className={'sidebar w-drawer' + (navOpen ? '' : ' w-hidden')}>
+        <div className={'sidebar' + (navOpen ? '' : ' w-hidden')}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
   <button className="w-btn w-ghost" onClick={() => { setNavOpen(false); setActiveTab("home"); }}>← 返回主界面</button>
 </div>

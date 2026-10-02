@@ -77,6 +77,5 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-spin{width:28px;height:28px;margin:0 auto 16px;border:3px solid var(--w-line);border-top-color:var(--w-accent);border-radius:50%;animation:w-rot .8s linear infinite}
 @keyframes w-rot{to{transform:rotate(360deg)}}
 /* 五期：高级=覆盖式抽屉（对齐 v5 定稿），不再挤压主界面 */
-.sidebar.w-drawer{position:fixed;left:0;top:0;bottom:0;z-index:40;width:232px;overflow-y:auto;box-shadow:6px 0 26px rgba(0,0,0,.20)}
 /* 长 URL（如本地服务地址）不要溢出侧边栏 */
 .sidebar.w-drawer *{max-width:100%;overflow-wrap:anywhere;word-break:break-word}
