@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SubAI Translator",
-  "version": "2.0.0",
+  "version": "4.1.0",
   "identifier": "com.subai.translator",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SubAI Translator v2.0",
+        "title": "SubAI Translator v4.1",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -37,5 +37,14 @@
       "models/**/*",
       "bin/**/*"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk5NDc2NjA0RTVFMkNBMUYKUldRZnl1TGxCR1pIbVM5cEFITnJpYW9XdWNTcExlT01aZjVpVDRzY2xvK2ZiTFVSWHVxYlluZEcK",
+      "endpoints": [
+        "https://github.com/1553752035-beep/SubAI-Translator/releases/latest/download/latest.json"
+      ],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

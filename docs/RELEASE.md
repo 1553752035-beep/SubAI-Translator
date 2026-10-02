@@ -188,3 +188,106 @@ git status --ignored    # 核对忽略集是否符合预期
 
 > 恢复优先级参考：编辑器本地历史（VS Code / CodeBuddy 的 `User\History`）> 卷影副本 > 回收站 > 文件恢复工具。
 > SSD + TRIM 开启时，文件恢复工具基本无效——**事前谨慎是唯一的保险**。
+
+---
+
+## 10. 安装包与自动更新（五期准备）
+
+### 10.1 构建安装包（NSIS）
+
+```powershell
+cd 源码/frontend
+
+# 精简版（不含 ASR 模型，约 290 MB）—— 与既有 lite 发布策略一致
+npm run tauri:build -- --bundles nsis --config src-tauri/tauri.lite.conf.json
+
+# 完整版（含 faster-whisper-small，约 760 MB）
+npm run tauri:build -- --bundles nsis
+```
+
+产物：`src-tauri/target/release/bundle/nsis/SubAI Translator_4.1.0_x64-setup.exe`
+
+**首次打包会从 GitHub 下载 NSIS 工具链**（`nsis-3.11.zip`）。网络不通时的兜底
+（用镜像手动放到缓存目录，之后打包不再联网）：
+
+```powershell
+$dir = Join-Path $env:LOCALAPPDATA "tauri\NSIS"; New-Item -ItemType Directory -Force $dir | Out-Null
+curl.exe -L -o "$dir\nsis-3.11.zip" `
+  "https://gh-proxy.com/https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip"
+```
+
+### 10.2 自动更新（Tauri Updater）
+
+| 项 | 值 |
+|---|---|
+| 私钥 | `C:\Users\Administrator\.tauri\subai-updater.key`（**无密码，务必离线备份**）|
+| 公钥 | 已写入 `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+| 更新源 | `https://github.com/1553752035-beep/SubAI-Translator/releases/latest/download/latest.json` |
+| 安装模式 | `passive`（静默安装，只在最后提示）|
+
+> ⚠️ **私钥丢失 = 已安装的旧版本再也收不到更新**（只能换新公钥、重新装机）；
+> **私钥泄露 = 他人可伪造更新包**。请离线备份，且永远不要提交到仓库（`.gitignore` 已加 `*.key`）。
+
+**发布一个可自动更新的版本：**
+
+```powershell
+cd 源码/frontend
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "C:\Users\Administrator\.tauri\subai-updater.key" -Raw
+npm run tauri:build -- --bundles nsis --config src-tauri/tauri.release.conf.json
+```
+
+会额外产出 `.nsis.zip` 与其 `.sig` 签名文件。把它们与安装包一起上传到 Release，
+并按下面格式写一个 `latest.json` 一起上传（`signature` 填 `.sig` 文件的内容）：
+
+```json
+{
+  "version": "4.1.0",
+  "notes": "四期交付与深化",
+  "pub_date": "2026-10-02T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "<.sig 文件内容>",
+      "url": "https://github.com/1553752035-beep/SubAI-Translator/releases/download/v4.1.0/SubAI Translator_4.1.0_x64-setup.nsis.zip"
+    }
+  }
+}
+```
+
+> 未设置 `TAURI_SIGNING_PRIVATE_KEY` 时**不要**用 `tauri.release.conf.json`（缺密钥会直接构建失败）。
+
+### 10.3 安装与卸载的实测行为
+
+本机实测（静默安装到临时目录 → 启动 → 卸载）：
+
+| 项 | 结果 |
+|---|---|
+| 安装内容 | `subai-translator.exe`（界面）+ `subai-backend.exe`（后端 sidecar，Tauri 会自动去掉平台后缀）+ `bin\ffmpeg.exe` |
+| 精简版 | **不含 `models\`**（ASR 模型按既有 lite 策略单独提供）|
+| 启动 | 应用启动后自动拉起后端 sidecar，`/api/health` 立即返回 200 ✓ |
+| 卸载 | 程序文件删除，但**保留 `data\` 目录**（tasks/terminology/translation_cache/openapi 等数据库）—— 卸载不会丢用户数据 |
+| 注册表 | 卸载后无残留项 ✓ |
+
+> 也就是说：重装后原有的任务记录、术语库与缓存仍在。若要彻底清空，需手动删除安装目录下的 `data\`。
+
+### 10.4 NSIS 工具链离线兜底（实测踩坑记录）
+
+Tauri 的 NSIS 打包会校验缓存目录 `%LOCALAPPDATA%\tauri\NSIS` 中的 **13 个必需文件**，
+任一缺失就**删掉整个目录并重新从 GitHub 下载**（本机网络下必然超时）。手工补齐时必须严格照它的布局：
+
+- 解压 `nsis-3.11.zip` 后把内层 `nsis-3.11\` 的内容**铺到 `NSIS\` 根**（等价于它的 `fs::rename`）；
+- `nsis_tauri_utils.dll` 必须放在 `NSIS\Plugins\x86-unicode\additional\`（**不是根目录**）；
+- zip 的 SHA1 需为 `EF7FF767E5CBD9EDD22ADD3A32C9B8F4500BB10D`，DLL 的 SHA1 需为 `75197FEE3C6A814FE035788D1C34EAD39349B860`，否则会触发重新下载。
+
+```powershell
+$dir = Join-Path $env:LOCALAPPDATA "tauri\NSIS"; New-Item -ItemType Directory -Force $dir | Out-Null
+$zip = Join-Path $env:TEMP "nsis-3.11.zip"
+curl.exe -sL -o $zip "https://gh-proxy.com/https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip"
+$tmp = Join-Path $env:TEMP "nsis-extract"; Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $tmp)
+Get-ChildItem (Join-Path $tmp "nsis-3.11") | ForEach-Object { Move-Item $_.FullName $dir -Force }
+$dllDir = Join-Path $dir "Plugins\x86-unicode\additional"; New-Item -ItemType Directory -Force $dllDir | Out-Null
+curl.exe -sL -o (Join-Path $dllDir "nsis_tauri_utils.dll") "https://gh-proxy.com/https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll"
+```
+
+> 日常（不带更新产物）就用 10.1 的命令。CI 里可把私钥放进 GitHub Secret 再按上面的方式导出。

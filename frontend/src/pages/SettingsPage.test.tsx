@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }));
+
 vi.mock('../api', () => ({
   changePassword: vi.fn(),
   checkHealth: vi.fn(),
@@ -50,7 +52,7 @@ beforeEach(() => {
     user_id: 'u1', username: 'admin', role: 'admin', email: null,
     is_active: true, created_at: '', updated_at: '',
   });
-  vi.mocked(checkHealth).mockResolvedValue({ status: 'ok' });
+  vi.mocked(checkHealth).mockResolvedValue({ status: 'ok', version: '4.1.0' } as any);
   vi.mocked(getAsrDevice).mockResolvedValue({
     configured: 'auto', effective_device: 'cpu', compute_type: 'int8',
     ct2_cuda_supported: true, cuda_dll_dirs: [], free_vram_gb: 6.8,
@@ -138,5 +140,38 @@ describe("SettingsPage 语言与报表（四期）", () => {
     render(<SettingsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "导出统计 Excel" }));
     await waitFor(() => expect(vi.mocked(downloadReport)).toHaveBeenCalledWith("xlsx"));
+  });
+});
+
+describe("SettingsPage 版本与更新", () => {
+  it("显示当前版本", async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByText("版本与更新")).toBeInTheDocument();
+    expect(screen.getByText("4.1.0")).toBeInTheDocument();
+  });
+
+  it("已是最新时给出提示", async () => {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    vi.mocked(check).mockResolvedValue(null);
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+    expect(await screen.findByText(/已是最新版本/)).toBeInTheDocument();
+  });
+
+  it("有更新时给出新版本与安装按钮", async () => {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    vi.mocked(check).mockResolvedValue({ version: "9.9.9", body: "修复若干问题" } as any);
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+    expect(await screen.findByText(/发现新版本 9.9.9/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载并安装" })).toBeInTheDocument();
+  });
+
+  it("检查失败时给出失败提示而不是崩溃", async () => {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    vi.mocked(check).mockRejectedValue(new Error("updater 未配置"));
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+    expect(await screen.findByText(/检查更新失败：updater 未配置/)).toBeInTheDocument();
   });
 });

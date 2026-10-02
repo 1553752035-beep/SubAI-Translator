@@ -52,6 +52,9 @@ export function SettingsPage() {
   const [detectText, setDetectText] = useState('');
   const [detectResult, setDetectResult] = useState('');
   const [openStats, setOpenStats] = useState<any>(null);
+  const [updateMsg, setUpdateMsg] = useState('');
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<any>(null);
   const [testResult, setTestResult] = useState<any>(null);
 
   const [cloudUrl, setCloudUrl] = useState('');
@@ -111,6 +114,43 @@ export function SettingsPage() {
         : "无法判定该文本的语言");
     } catch {
       setDetectResult("检测失败");
+    }
+  };
+
+  // 四期深化：检查更新（插件按需动态导入，浏览器/测试环境不受影响）
+  const doCheckUpdate = async () => {
+    setUpdateBusy(true);
+    setUpdateMsg('正在检查更新…');
+    try {
+      const mod = await import('@tauri-apps/plugin-updater');
+      const update = await mod.check();
+      if (!update) {
+        setPendingUpdate(null);
+        setUpdateMsg('已是最新版本（当前 ' + (health ? String(health.version) : '未知') + '）');
+      } else {
+        setPendingUpdate(update);
+        setUpdateMsg('发现新版本 ' + String(update.version)
+          + (update.body ? '：' + String(update.body) : ''));
+      }
+    } catch (e: any) {
+      setUpdateMsg('检查更新失败：' + String(e?.message || e));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const doInstallUpdate = async () => {
+    if (!pendingUpdate) return;
+    setUpdateBusy(true);
+    setUpdateMsg('正在下载并安装更新，请勿关闭程序…');
+    try {
+      await pendingUpdate.downloadAndInstall();
+      setUpdateMsg('更新已安装，正在重启…');
+      const proc = await import('@tauri-apps/plugin-process');
+      await proc.relaunch();
+    } catch (e: any) {
+      setUpdateMsg('更新失败：' + String(e?.message || e));
+      setUpdateBusy(false);
     }
   };
 
@@ -287,6 +327,27 @@ export function SettingsPage() {
               强制锁定：术语译名 100% 一致（占位符替换后再还原），术语作定语时句式可能略生硬。<br />
               软提示：把命中的术语作为"必须使用"的要求交给模型，语句更自然，但不保证逐字一致。<br />
               两种模式下，命中术语的字幕行都不会使用翻译缓存（术语改动后必须重译）。
+            </div>
+          </div>
+        </div>
+
+        <div className="table-card">
+          <div className="table-head"><div className="t">版本与更新</div></div>
+          <div className="set-body">
+            <Row label="当前版本" value={health ? String(health.version) : '-'} />
+            <div className="set-actions">
+              <button className="btn" disabled={updateBusy} onClick={() => void doCheckUpdate()}>
+                检查更新
+              </button>
+              {pendingUpdate && (
+                <button className="btn" disabled={updateBusy} onClick={() => void doInstallUpdate()}>
+                  下载并安装
+                </button>
+              )}
+            </div>
+            {updateMsg && <div className="auth-msg ok">{updateMsg}</div>}
+            <div className="set-hint">
+              更新包需通过签名校验才会安装；更新源为本仓库 GitHub Releases 的 latest.json。
             </div>
           </div>
         </div>

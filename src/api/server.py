@@ -48,6 +48,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+from src import __version__ as APP_VERSION
 from src.config import config, reload_config, persist_env
 from src.cancel import (
     TaskCancelled,
@@ -142,7 +143,7 @@ class ChangePasswordRequest(BaseModel):
 class HealthResponse(BaseModel):
     """健康检查响应"""
     status: str
-    version: str = "2.0.0"
+    version: str = APP_VERSION
     llm_mode: str = config.llm.mode
     asr_device: str = config.asr.device
     queue_stats: dict = {}
@@ -457,7 +458,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SubAI Translator API",
     description="AI视频字幕识别与翻译服务",
-    version="2.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 

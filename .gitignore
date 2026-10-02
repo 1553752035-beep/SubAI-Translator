@@ -61,3 +61,6 @@ desktop.ini
 # 插件系统（四期 4.3）：运行时状态与用户插件目录不入库
 data/plugins.json
 /plugins/
+# 更新签名私钥绝不入库（私钥在用户的 .tauri 目录）
+*.key
+*.key.pub
