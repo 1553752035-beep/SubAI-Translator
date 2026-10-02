@@ -327,7 +327,6 @@ export default function App() {
         <div className={'sidebar' + (navOpen ? '' : ' w-hidden')}>
           <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
   <button className="w-btn w-ghost" onClick={() => { setNavOpen(false); setActiveTab("home"); }}>← 返回主界面</button>
-  <button className="w-btn w-ghost" onClick={() => setNavOpen(false)}>收起</button>
 </div>
           {NAV_ITEMS.map((item) => (
             <div
@@ -395,7 +394,7 @@ export default function App() {
                 onEditTask={(id) => setActiveTaskId(id)}
                 theme={theme}
                 onToggleTheme={toggleTheme}
-                onOpenAdvanced={() => setNavOpen(true)}
+                onOpenAdvanced={() => setNavOpen((v) => !v)}  // 开关：再点一次收起
               />
               {activeTaskId && (
                 <>
