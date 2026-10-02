@@ -30,6 +30,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [busy, setBusy] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [msg, setMsg] = useState('');
+  const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
   const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -119,6 +120,49 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
     setMsg('已合并两行（Ctrl+Z 可撤销）');
   };
 
+  /** 找离时间 t 最近的词边界（拿不到词边界时退化为起止点） */
+  const nearestWord = (r: Row, t: number): { at: number; dist: number } => {
+    const ws = (r.words && r.words.length >= 2) ? r.words : [r.start, r.end];
+    let best = ws[0];
+    let d = Infinity;
+    for (const w of ws) { const dd = Math.abs(w - t); if (dd < d) { d = dd; best = w; } }
+    return { at: best, dist: d };
+  };
+
+  /** 在编辑态按 Ctrl+Enter：以光标处为意图，切点默认吸附到最近的词边界 */
+  const openSplit = () => {
+    if (editing < 0) return;
+    const r = rows[editing];
+    const pos = Math.max(1, Math.min(textOf(r).length - 1, inputRef.current?.selectionStart ?? Math.floor(textOf(r).length / 2)));
+    const mid = r.start + (r.end - r.start) * (pos / Math.max(1, textOf(r).length));
+    const w = nearestWord(r, mid);
+    setSplitting({ id: r.id, pos, at: w.at });
+    setMsg('切点已默认吸附到最近的词边界，可拖动微调');
+  };
+
+  const doSplit = () => {
+    if (!splitting) return;
+    const r = rows.find((x) => x.id === splitting.id);
+    if (!r) { setSplitting(null); return; }
+    const at = splitting.at;
+    const pos = splitting.pos;
+    const t = textOf(r);
+    const ws = (r.words && r.words.length >= 2) ? r.words : [r.start, r.end];
+    const a: Row = { ...r, end: at, translation: t.slice(0, pos), source: (r.source || '').slice(0, pos), words: ws.filter((w) => w <= at).concat([at]) };
+    const b: Row = { ...r, id: newId(), start: at, translation: t.slice(pos), source: (r.source || '').slice(pos), words: [at].concat(ws.filter((w) => w > at)) };
+    pushAct({ kind: 'split', id: r.id, before: r, after: [a, b] });
+    setRows((prev) => {
+      const k = prev.findIndex((x) => x.id === r.id);
+      const next = [...prev];
+      if (k >= 0) next.splice(k, 1, a, b);
+      return next;
+    });
+    setDirty((d) => ({ ...d, [a.id]: true, [b.id]: true }));
+    setSplitting(null);
+    setEditing(-1);
+    setMsg('已拆分为两行（Ctrl+Z 可撤销）');
+  };
+
   const undo = () => {
     const a = stackRef.current.pop();
     if (!a) { setMsg('没有可撤销的操作'); return; }
@@ -151,6 +195,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       const inInput = tag === 'INPUT' || tag === 'TEXTAREA';
       if (editing >= 0) {
+        if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openSplit(); return; }
         if (e.key === 'Enter') { e.preventDefault(); commit(); }
         else if (e.key === 'Escape') { e.preventDefault(); setEditing(-1); }
         return;
@@ -227,6 +272,9 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
             >
               <div className="w-time">{isCur ? '▶ ' : ''}{mmss(r.start) + ' → ' + mmss(r.end)}</div>
               <div className="w-text">
+                {isEd && splitting && splitting.id === r.id && (
+                  <span className="w-split-hint">光标处按 Ctrl+Enter 拆分</span>
+                )}
                 {isEd ? (
                   <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} onClick={(e) => e.stopPropagation()} />
                 ) : (
@@ -244,6 +292,58 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
           );
         })}
       </div>
+      {splitting && (() => {
+        const r = rows.find((x) => x.id === splitting.id);
+        if (!r) return null;
+        const total = Math.max(0.01, r.end - r.start);
+        const pct = ((splitting.at - r.start) / total) * 100;
+        const ws = (r.words && r.words.length >= 2) ? r.words : [r.start, r.end];
+        const near = nearestWord(r, splitting.at);
+        const snapped = near.dist < 0.18;
+        const left = splitting.at - r.start;
+        const right = r.end - splitting.at;
+        return (
+          <div className="w-splitpanel">
+            <div className="w-sp-bar">
+              <div className="w-sp-chip"><b>{textOf(r).slice(0, splitting.pos) || '（空）'}</b><em>{left.toFixed(1)}s</em></div>
+              <div className="w-sp-chip"><b>{textOf(r).slice(splitting.pos) || '（空）'}</b><em>{right.toFixed(1)}s</em></div>
+            </div>
+            <div
+              className="w-sp-track"
+              onClick={(e) => {
+                const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                const ratio = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+                const raw = r.start + ratio * total;
+                const w = nearestWord(r, raw);
+                setSplitting({ ...splitting, at: w.dist < 0.18 ? w.at : raw });
+              }}
+            >
+              <div className="w-sp-base" />
+              <div className="w-sp-fill" style={{ width: pct + '%' }} />
+              {ws.map((w, k) => (
+                <span key={k} className={'w-sp-tick' + (snapped && Math.abs(w - near.at) < 1e-6 ? ' hit' : '')} style={{ left: ((w - r.start) / total) * 100 + '%' }} />
+              ))}
+              <span className={'w-sp-cursor' + (snapped ? ' snapped' : '')} style={{ left: pct + '%' }} />
+              {snapped && <span className="w-sp-snap" style={{ left: pct + '%' }}>已吸附: {splitting.at.toFixed(1)}s</span>}
+            </div>
+            <div className="w-sp-hint">
+              <span>拖动可微调 · 虚线圆点是词边界，靠近会自动吸附</span>
+              <span>{snapped ? '已吸附到词边界 ✓' : '自由位置（未吸附）'}</span>
+            </div>
+            {right < 0.5 && <div className="w-sp-warn">⚠ 第二句只有 {right.toFixed(1)}s，不足 0.5 秒，可能听不清</div>}
+            <div className="w-sp-acts">
+              <button className="w-btn w-ghost" onClick={() => { setSplitting(null); setMsg('已取消拆分'); }}>取消</button>
+              <button
+                className="w-btn w-primary"
+                onClick={() => {
+                  if (right < 0.5 && !window.confirm('第二句只有 ' + right.toFixed(1) + 's，不足 0.5 秒，烧录后可能一闪而过。\n\n仍然拆分吗？')) return;
+                  doSplit();
+                }}
+              >确认拆分</button>
+            </div>
+          </div>
+        );
+      })()}
       <div className="w-center">
         <button className="w-btn w-primary" disabled={busy || rendering} onClick={() => void confirmAndRender()}>
           {rendering ? '正在生成视频…' : '确认无误，生成视频'}</button>
