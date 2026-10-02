@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": [
+      "bin/**/*"
+    ],
+    "createUpdaterArtifacts": true
+  }
+}

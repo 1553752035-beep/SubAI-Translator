@@ -64,3 +64,7 @@ data/plugins.json
 # 更新签名私钥绝不入库（私钥在用户的 .tauri 目录）
 *.key
 *.key.pub
+
+# 更新产物（构建物，随 Release 分发而非入库）
+*.nsis.zip
+*.nsis.zip.sig
