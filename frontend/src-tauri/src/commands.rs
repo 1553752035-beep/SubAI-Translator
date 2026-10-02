@@ -432,7 +432,7 @@ pub async fn get_help_info() -> Result<serde_json::Value, String> {
             "多语言支持（72 种语言，可自动检测）",
             "免登录：本机令牌",
             "完成后自动出片（软字幕 / 硬字幕）",
-            "打字自动对轴；已有字幕可直接套"
+            "打字自动对轴；已有字幕可直接套",
             "开放平台（API 密钥、限流、Webhook 回调、Python/JS SDK）",
             "数据分析与报表导出（Excel / PDF / HTML）",
             "任务取消与实时进度"
