@@ -187,7 +187,7 @@ export function TasksPage() {
     const isTrash = showTrash;
     if (!window.confirm(isTrash ? '彻底删除这个任务？\n\n会一起删掉：本任务产出的视频与字幕文件。\n（你自己「视频」文件夹里的源视频不会被删）' : '确定删除这个任务？删除后可在「回收站」查看。')) return;
     try { if (isTrash) { await purgeTask(taskId); } else { await deleteTask(taskId); } await handleRefresh(); }
-    catch (error) { console.error('删除失败:', error); window.alert('删除失败（请看后端日志）'); }
+    catch (error: any) { const d = error?.response?.data?.detail || error?.message || String(error); console.error('删除失败:', error); window.alert('删除失败：' + d); }
   };
 
   // 五期：批量删除选中的任务
@@ -198,7 +198,7 @@ export function TasksPage() {
       for (const id of selectedIds) { await deleteTask(id); }
       setSelectedIds([]);
       await handleRefresh();
-    } catch (error) { console.error('批量删除失败:', error); window.alert('批量删除失败（请看后端日志）'); }
+    } catch (error: any) { const d = error?.response?.data?.detail || error?.message || String(error); console.error('删除失败:', error); window.alert('删除失败：' + d); }
   };
 
   // 过滤任务
