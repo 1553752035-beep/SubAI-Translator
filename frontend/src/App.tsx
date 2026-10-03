@@ -60,6 +60,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => getSavedTheme() ?? systemTheme());
   // 五期：高级功能默认收起来，主界面只留三段式向导
   const [navOpen, setNavOpen] = useState(false);
+  const [confirmTask, setConfirmTask] = useState<string | null>(null);
   const [user, setUser] = useState<UserInfo | null>(null);
   // 后端是否要求账号登录（默认否 = 免登录模式）
   const [requireLogin, setRequireLogin] = useState(false);
@@ -276,6 +277,17 @@ export default function App() {
   }
   }
 
+  // 五期：确认页作为独立整页显示（不在向导页下方挤着）
+  if (confirmTask) {
+    return (
+      <div className="w-app">
+        <div className="w-wrap">
+          <SimpleSubtitleEditor taskId={confirmTask} onClose={() => setConfirmTask(null)} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <div className="titlebar">
@@ -340,7 +352,7 @@ export default function App() {
           {activeTab === 'home' && (
             <>
               <WizardPage
-                onEditTask={(id) => setActiveTaskId(id)}
+                onEditTask={(id) => { setActiveTaskId(id); setConfirmTask(id); }}
                 theme={theme}
                 onToggleTheme={toggleTheme}
                 onOpenAdvanced={() => setNavOpen((v) => !v)}
