@@ -1540,6 +1540,24 @@ async def delete_task(
     }
 
 
+@app.delete("/api/task")
+async def delete_task_by_query(
+    task_id: str,
+    current_user: UserRecord = Depends(get_current_user)
+):
+    """五期：删除任务（task_id 走 query，避免路径里的空格等特殊字符）。"""
+    return await delete_task(task_id=task_id, current_user=current_user)
+
+
+@app.delete("/api/task/purge")
+async def purge_task_by_query(
+    task_id: str,
+    current_user: UserRecord = Depends(get_current_user)
+):
+    """五期：彻底移除任务（task_id 走 query）。"""
+    return await purge_task(task_id=task_id, current_user=current_user)
+
+
 @app.delete("/api/task/{task_id}/purge")
 async def purge_task(
     task_id: str,

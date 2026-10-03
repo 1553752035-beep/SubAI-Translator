@@ -243,13 +243,13 @@ export const cancelTask = async (taskId: string) => {
 // 后端返回 { tasks, total }，不是数组
 /** 五期：删除任务（后端已有 DELETE /api/task/{id}） */
 export const deleteTask = async (taskId: string): Promise<void> => {
-  await api.delete('/task/' + encodeURIComponent(taskId));
+  await api.delete('/task', { params: { task_id: taskId } });   // 五期：走 query，避开路径特殊字符
 };
 
 
 /** 五期：从回收站彻底移除任务记录（后端不动磁盘文件） */
 export const purgeTask = async (taskId: string): Promise<void> => {
-  await api.delete('/task/' + encodeURIComponent(taskId) + '/purge');
+  await api.delete('/task/purge', { params: { task_id: taskId } });
 };
 export const getHistory = async (params?: {
   status?: string;
