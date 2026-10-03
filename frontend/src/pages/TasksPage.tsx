@@ -122,6 +122,8 @@ export function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<TaskRecord | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
 
   // 加载历史记录
   useEffect(() => {
@@ -177,10 +179,28 @@ export function TasksPage() {
     }
   };
 
+  // 五期：删除（后端为归档，可在「回收站」查看）；只刷新列表，不整页跳回首页
+  const handleDelete = async (taskId: string) => {
+    if (!window.confirm('确定删除这个任务？删除后可在「回收站」查看。')) return;
+    try { await deleteTask(taskId); await handleRefresh(); }
+    catch (error) { console.error('删除失败:', error); window.alert('删除失败（请看后端日志）'); }
+  };
+
+  // 五期：批量删除选中的任务
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm('确定删除选中的 ' + selectedIds.length + ' 个任务？')) return;
+    try {
+      for (const id of selectedIds) { await deleteTask(id); }
+      setSelectedIds([]);
+      await handleRefresh();
+    } catch (error) { console.error('批量删除失败:', error); window.alert('批量删除失败（请看后端日志）'); }
+  };
+
   // 过滤任务
-  const filteredTasks = filterStatus
-    ? tasks.filter(t => t.status === filterStatus)
-    : tasks;
+  // 五期：删除=归档，默认不出现在列表里（进「回收站」才看到）
+  const baseTasks = showTrash ? tasks.filter((t) => t.status === 'archived') : tasks.filter((t) => t.status !== 'archived');
+  const filteredTasks = filterStatus ? baseTasks.filter((t) => t.status === filterStatus) : baseTasks;
 
   return (
     <>
@@ -188,7 +208,11 @@ export function TasksPage() {
         <h1>任务列表</h1>
         <div className="sub">查看和管理所有翻译任务</div>
         <div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn" onClick={() => { setShowTrash(!showTrash); setSelectedIds([]); }}>{showTrash ? '← 返回任务列表' : '回收站'}</button>
+          <button className="btn" disabled={selectedIds.length === 0} onClick={() => void handleDeleteSelected()}>删除选中（{selectedIds.length}）</button>
           <button className="btn" onClick={handleRefresh}>刷新</button>
+        </div>
         </div>
       </div>
 
@@ -252,6 +276,11 @@ export function TasksPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: '36px' }}>
+                  <input type="checkbox" title="全选"
+                    checked={filteredTasks.length > 0 && selectedIds.length === filteredTasks.length}
+                    onChange={(e) => setSelectedIds(e.target.checked ? filteredTasks.map((t) => t.task_id) : [])} />
+                </th>
                 <th style={{ width: '120px' }}>任务 ID</th>
                 <th>视频名称</th>
                 <th style={{ width: '80px' }}>模式</th>
@@ -265,6 +294,10 @@ export function TasksPage() {
             <tbody>
               {filteredTasks.map((task) => (
                 <tr key={task.task_id}>
+                  <td>
+                    <input type="checkbox" checked={selectedIds.includes(task.task_id)}
+                      onChange={(e) => setSelectedIds(e.target.checked ? [...selectedIds, task.task_id] : selectedIds.filter((x) => x !== task.task_id))} />
+                  </td>
                   <td className="idx">{task.task_id}</td>
                   <td>{task.video_path.split('\\').pop() || task.video_path}</td>
                   <td>{task.mode}</td>
@@ -278,11 +311,7 @@ export function TasksPage() {
                       {(task.status === 'pending' || task.status === 'processing') && (
                         <button className="btn" onClick={() => void handleCancel(task.task_id)}>取消</button>
                       )}
-                      <button className="btn" onClick={async () => {
-                        if (!window.confirm('确定删除这个任务？此操作不可恢复。')) return;
-                        try { await deleteTask(task.task_id); setTimeout(() => window.location.reload(), 300); }
-                        catch { window.alert('删除失败（请看后端日志）'); }
-                      }}>删除</button>
+                      <button className="btn" onClick={() => void handleDelete(task.task_id)}>删除</button>
                     </div>
                   </td>
                 </tr>
