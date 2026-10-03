@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { deleteTask, cancelTask, getHistory } from '../api';
+import { deleteTask, purgeTask, cancelTask, getHistory } from '../api';
 import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
@@ -184,8 +184,9 @@ export function TasksPage() {
 
   // 五期：删除（后端为归档，可在「回收站」查看）；只刷新列表，不整页跳回首页
   const handleDelete = async (taskId: string) => {
-    if (!window.confirm('确定删除这个任务？删除后可在「回收站」查看。')) return;
-    try { await deleteTask(taskId); await handleRefresh(); }
+    const isTrash = showTrash;
+    if (!window.confirm(isTrash ? '从回收站彻底移除这个任务记录？（磁盘上的视频/字幕文件不会删除）' : '确定删除这个任务？删除后可在「回收站」查看。')) return;
+    try { if (isTrash) { await purgeTask(taskId); } else { await deleteTask(taskId); } await handleRefresh(); }
     catch (error) { console.error('删除失败:', error); window.alert('删除失败（请看后端日志）'); }
   };
 

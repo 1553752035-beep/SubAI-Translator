@@ -246,6 +246,11 @@ export const deleteTask = async (taskId: string): Promise<void> => {
   await api.delete('/task/' + encodeURIComponent(taskId));
 };
 
+
+/** 五期：从回收站彻底移除任务记录（后端不动磁盘文件） */
+export const purgeTask = async (taskId: string): Promise<void> => {
+  await api.delete('/task/' + encodeURIComponent(taskId) + '/purge');
+};
 export const getHistory = async (params?: {
   status?: string;
   limit?: number;

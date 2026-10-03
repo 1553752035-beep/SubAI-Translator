@@ -1540,6 +1540,28 @@ async def delete_task(
     }
 
 
+@app.delete("/api/task/{task_id}/purge")
+async def purge_task(
+    task_id: str,
+    current_user: UserRecord = Depends(get_current_user)
+):
+    """五期：「回收站」里彻底移除任务记录。
+
+    只删数据库记录，**不动磁盘上的视频/字幕文件**（避免误删用户文件）。
+    """
+    global task_manager
+
+    if task_manager is None:
+        raise RuntimeError("任务管理器未初始化")
+
+    task = await task_manager.get_task(task_id, user_id=_scope_user_id(current_user))
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+    ok = await task_manager.delete_task(task_id)
+    return {"task_id": task_id, "purged": bool(ok), "message": "已彻底移除（磁盘文件仍保留）"}
+
+
 @app.get("/api/output/{filename}")
 async def get_output_file(
     filename: str,
