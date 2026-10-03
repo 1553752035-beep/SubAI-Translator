@@ -199,7 +199,9 @@ export function TasksPage() {
 
   // 过滤任务
   // 五期：删除=归档，默认不出现在列表里（进「回收站」才看到）
-  const baseTasks = showTrash ? tasks.filter((t) => t.status === 'archived') : tasks.filter((t) => t.status !== 'archived');
+  const baseTasks = showTrash
+    ? tasks.filter((t) => t.status === 'archived' || t.status === 'cancelled')
+    : tasks.filter((t) => t.status !== 'archived' && t.status !== 'cancelled');
   const filteredTasks = filterStatus ? baseTasks.filter((t) => t.status === filterStatus) : baseTasks;
 
   return (
