@@ -141,7 +141,9 @@ def _regroup(segments, max_chars: int = MAX_CHARS, max_dur: float = MAX_DUR) -> 
     for seg in out:
         if merged and len(seg["text"]) < 2:
             merged[-1]["text"] = (merged[-1]["text"] + seg["text"]).strip()
-            merged[-1]["end"] = seg["end"]
+            # 五期修复：原来这里写 merged[-1]["end"] = seg["end"]，会把上一行字幕的结束时间
+            # 推到碎片的时间点，于是"没人说话"的空档也被上一行字幕覆盖（用户看到"静默"占 4 秒）。
+            # 文字接上即可，时间保持上一行自己的结束点。
         else:
             merged.append(seg)
     return merged
