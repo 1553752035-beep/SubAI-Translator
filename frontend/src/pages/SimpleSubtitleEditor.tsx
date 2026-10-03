@@ -32,6 +32,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [msg, setMsg] = useState('');
   const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -277,7 +278,7 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
               key={r.id}
               id={'subrow-' + r.id}
               className={'w-subrow' + (isCur ? ' cur' : '') + (sus ? ' suspect' : '')}
-              onClick={() => (isEd ? undefined : setCur(i))}
+              onClick={() => { if (!isEd) { setCur(i); setMenuFor(null); } }}
               onDoubleClick={() => startEdit(i)}
             >
               <div className="w-time">{isCur ? '▶ ' : ''}{mmss(r.start) + ' → ' + mmss(r.end)}</div>
@@ -292,8 +293,14 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
                 )}
                 {!isEd && (
                   <span className="w-rowacts">
-                    {i > 0 && <span className="w-merge" title="与上一行合并" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'up'); }}>⇧ 并入上行</span>}
-                    {i < rows.length - 1 && <span className="w-merge" title="与下一行合并" onClick={(e) => { e.stopPropagation(); mergeRows(i, 'down'); }}>⇩ 并入下行</span>}
+                    <span className="w-merge" title="断句修正" onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === r.id ? null : r.id); }}>断句</span>
+                  </span>
+                )}
+                {menuFor === r.id && (
+                  <span className="w-menu" onClick={(e) => e.stopPropagation()}>
+                    {i > 0 && <span className="w-menu-item" onClick={() => { mergeRows(i, 'up'); setMenuFor(null); }}>⇧ 并入上行</span>}
+                    {i < rows.length - 1 && <span className="w-menu-item" onClick={() => { mergeRows(i, 'down'); setMenuFor(null); }}>⇩ 并入下行</span>}
+                    <span className="w-menu-tip">拆分：双击进编辑后按 Ctrl+Enter</span>
                   </span>
                 )}
                 {dirty[r.id] && !isEd && <span className="w-changed">已改</span>}

@@ -66,7 +66,7 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 @media(max-width:720px){.w-cards,.w-themepick{grid-template-columns:1fr}}
 /* 五期：字幕编辑器（只改文字，不动时间轴） */
 .w-subs{margin-top:14px;background:var(--w-bg2);border:1px solid var(--w-line);border-radius:14px;padding:6px 10px;box-shadow:var(--w-shadow)}
-.w-subrow{display:flex;gap:12px;align-items:flex-start;padding:9px 10px;border-radius:9px;cursor:pointer}
+.w-subrow{position:relative;display:flex;gap:12px;align-items:flex-start;padding:9px 10px;border-radius:9px;cursor:pointer}
 .w-subrow:hover{background:var(--w-hover)}
 .w-time{color:var(--w-dim);font-size:12px;font-variant-numeric:tabular-nums;padding-top:3px;min-width:104px}
 .w-text{flex:1;font-size:14px}
@@ -111,3 +111,8 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-sp-hint{display:flex;justify-content:space-between;gap:10px;color:var(--w-dim);font-size:12px;margin-top:4px;flex-wrap:wrap}
 .w-sp-warn{color:#8a5a00;font-size:12.5px;margin-top:6px}
 .w-sp-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+/* 五期：断句入口的小菜单 */
+.w-menu{position:absolute;right:10px;top:calc(100% - 4px);z-index:12;display:flex;flex-direction:column;gap:2px;background:var(--w-bg2);border:1px solid var(--w-line2);border-radius:10px;padding:6px;box-shadow:0 10px 26px rgba(0,0,0,.20);min-width:190px}
+.w-menu-item{font-size:12.5px;padding:5px 9px;border-radius:7px;cursor:pointer;color:var(--w-text)}
+.w-menu-item:hover{background:var(--w-soft);color:var(--w-accent)}
+.w-menu-tip{font-size:11px;color:var(--w-note);padding:3px 9px 1px}
