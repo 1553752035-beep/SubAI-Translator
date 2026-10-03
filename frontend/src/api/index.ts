@@ -241,6 +241,11 @@ export const cancelTask = async (taskId: string) => {
 };
 
 // 后端返回 { tasks, total }，不是数组
+/** 五期：删除任务（后端已有 DELETE /api/task/{id}） */
+export const deleteTask = async (taskId: string): Promise<void> => {
+  await api.delete('/task/' + encodeURIComponent(taskId));
+};
+
 export const getHistory = async (params?: {
   status?: string;
   limit?: number;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { cancelTask, getHistory } from '../api';
+import { deleteTask, cancelTask, getHistory } from '../api';
 import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
@@ -248,7 +248,7 @@ export function TasksPage() {
           暂无任务记录
         </div>
       ) : (
-        <div className="table-card">
+        <div className="table-card" style={{ maxHeight: '62vh', overflowY: 'auto', overflowX: 'auto' }}>
           <table>
             <thead>
               <tr>
@@ -278,6 +278,11 @@ export function TasksPage() {
                       {(task.status === 'pending' || task.status === 'processing') && (
                         <button className="btn" onClick={() => void handleCancel(task.task_id)}>取消</button>
                       )}
+                      <button className="btn" onClick={async () => {
+                        if (!window.confirm('确定删除这个任务？此操作不可恢复。')) return;
+                        try { await deleteTask(task.task_id); setTimeout(() => window.location.reload(), 300); }
+                        catch { window.alert('删除失败（请看后端日志）'); }
+                      }}>删除</button>
                     </div>
                   </td>
                 </tr>
