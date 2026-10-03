@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
+import { getTaskStatus, getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
 import type { SubtitleSegment } from '../types';
 import '../styles/wizard.css';
 
@@ -21,7 +21,7 @@ const mmss = (t: number): string => {
 let seq = 0;
 const newId = (): string => 'r' + (++seq).toString(36) + Date.now().toString(36).slice(-4);
 
-export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
+export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onClose?: () => void }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [cur, setCur] = useState(0);
   const [editing, setEditing] = useState(-1);
@@ -33,8 +33,21 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState('');
   const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await getTaskStatus(taskId);
+        const vp = (t as unknown as { video_path?: string }).video_path || "";
+        if (!vp) return;
+        const { convertFileSrc } = await import("@tauri-apps/api/core");
+        setVideoUrl(convertFileSrc(vp));
+      } catch { /* 预览不可用不影响编辑 */ }
+    })();
+  }, [taskId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,9 +278,39 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
   }
 
   return (
-    <div style={{ marginTop: 26 }}>
-      <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
-      <div className="w-sub">点哪行改哪行。<span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销　·　编辑时 <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Enter</span> 在此处拆分{suspectCount > 0 && <>　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b></>}</div>
+    <div className="w-conf">
+      <div className="w-conf-top">
+        <div>
+          <h2 className="w-h2">确认字幕（这一步还不出片）</h2>
+          <div className="w-conf-stat">共 {rows.length} 行　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b>　·　已改 {dirtyCount} 处</div>
+          <div className="w-sub" style={{ marginTop: 6 }}><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销 · 编辑时 <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Enter</span> 拆分</div>
+        </div>
+        {onClose && <button className="w-btn w-ghost" onClick={onClose}>← 返回主界面</button>}
+      </div>
+      <div className="w-conf-grid">
+        <div>
+          <div className="w-conf-card" style={{ padding: 14 }}>
+            <div className="w-player">
+              {videoUrl ? <video src={videoUrl} controls preload="metadata" /> : <div className="ph">原视频预览（当前环境不可播放，可直接打开原文件）</div>}
+            </div>
+            <div className="w-bar">
+              {rows.map((r2) => (
+                <span key={r2.id} className="seg" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%', width: ((Math.max(0.05, r2.end - r2.start) / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} />
+              ))}
+              {rows.map((r2, k) => (suspectOf(r2) ? <span key={'d' + r2.id} className="dot" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} title={'可疑：' + textOf(r2)} onClick={() => setCur(k)} /> : null))}
+              <span className="head" style={{ left: (((rows[cur] ? rows[cur].start : 0) / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} />
+            </div>
+            <div className="w-legend">
+              <span><s />有字幕</span>
+              <span><i />可疑（点黄点跳过去）</span>
+              <span style={{ color: 'var(--w-accent)' }}>▶ 当前行</span>
+              <span style={{ marginLeft: 'auto' }}>第 {cur + 1} / {rows.length} 行</span>
+            </div>
+          </div>
+        </div>
+        <div className="w-conf-card">
+          <div className="w-conflist">
+            <div className="w-subs" style={{ marginTop: 0, border: 0, boxShadow: 'none', background: 'transparent', padding: 0 }}>
       <div className="w-subs">
         {rows.map((r, i) => {
           const isCur = i === cur;
@@ -359,63 +402,14 @@ export function SimpleSubtitleEditor({ taskId }: { taskId: string }) {
           );
         })}
       </div>
-      {splitting && (() => {
-        const r = rows.find((x) => x.id === splitting.id);
-        if (!r) return null;
-        const total = Math.max(0.01, r.end - r.start);
-        const pct = ((splitting.at - r.start) / total) * 100;
-        const ws = (r.words && r.words.length >= 2) ? r.words : [r.start, r.end];
-        const near = nearestWord(r, splitting.at);
-        const snapped = near.dist < 0.18;
-        const left = splitting.at - r.start;
-        const right = r.end - splitting.at;
-        return (
-          <div className="w-splitpanel">
-            <div className="w-sp-bar">
-              <div className="w-sp-chip"><b>{textOf(r).slice(0, splitting.pos) || '（空）'}</b><em>{left.toFixed(1)}s</em></div>
-              <div className="w-sp-chip"><b>{textOf(r).slice(splitting.pos) || '（空）'}</b><em>{right.toFixed(1)}s</em></div>
-            </div>
-            <div
-              className="w-sp-track"
-              onClick={(e) => {
-                const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                const ratio = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-                const raw = r.start + ratio * total;
-                const w = nearestWord(r, raw);
-                setSplitting({ ...splitting, at: w.dist < 0.18 ? w.at : raw });
-              }}
-            >
-              <div className="w-sp-base" />
-              <div className="w-sp-fill" style={{ width: pct + '%' }} />
-              {ws.map((w, k) => (
-                <span key={k} className={'w-sp-tick' + (snapped && Math.abs(w - near.at) < 1e-6 ? ' hit' : '')} style={{ left: ((w - r.start) / total) * 100 + '%' }} />
-              ))}
-              <span className={'w-sp-cursor' + (snapped ? ' snapped' : '')} style={{ left: pct + '%' }} />
-              {snapped && <span className="w-sp-snap" style={{ left: pct + '%' }}>已吸附: {splitting.at.toFixed(1)}s</span>}
-            </div>
-            <div className="w-sp-hint">
-              <span>拖动可微调 · 虚线圆点是词边界，靠近会自动吸附</span>
-              <span>{snapped ? '已吸附到词边界 ✓' : '自由位置（未吸附）'}</span>
-            </div>
-            {right < 0.5 && <div className="w-sp-warn">⚠ 第二句只有 {right.toFixed(1)}s，不足 0.5 秒，可能听不清</div>}
-            <div className="w-sp-acts">
-              <button className="w-btn w-ghost" onClick={() => { setSplitting(null); setMsg('已取消拆分'); }}>取消</button>
-              <button
-                className="w-btn w-primary"
-                onClick={() => {
-                  if (right < 0.5 && !window.confirm('第二句只有 ' + right.toFixed(1) + 's，不足 0.5 秒，烧录后可能一闪而过。\n\n仍然拆分吗？')) return;
-                  doSplit();
-                }}
-              >确认拆分</button>
             </div>
           </div>
-        );
-      })()}
-      <div className="w-center">
-        <button className="w-btn w-primary" disabled={busy || rendering} onClick={() => void confirmAndRender()}>
-          {rendering ? '正在生成视频…' : '确认无误，生成视频'}</button>
-        <button className="w-btn w-ghost" disabled={busy || rendering} onClick={() => void save()}>
-          {busy ? '保存中…' : '只保存字幕'}</button>
+        </div>
+      </div>
+      <div className="w-conf-foot">
+        <span className="stat">{dirtyCount > 0 ? '本次改动 ' + dirtyCount + ' 处，将记入「待确认纠错」' : '还没有改动'}</span>
+        <button className="w-btn w-ghost" disabled={busy || rendering} onClick={() => void save()}>{busy ? '保存中…' : '保存草稿'}</button>
+        <button className="w-btn w-primary" disabled={busy || rendering} onClick={() => void confirmAndRender()}>{rendering ? '正在生成视频…' : '确认无误，生成视频'}</button>
       </div>
       <div className="w-msg">{msg}{dirtyCount > 0 && !msg ? ('已改 ' + dirtyCount + ' 处（点「确认无误，生成视频」才会出片）') : ''}</div>
     </div>
