@@ -1558,8 +1558,29 @@ async def purge_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
+    # 五期：真删除——连同本任务产出的文件一起删掉（用户要求：删除就该是删除）。
+    # 安全底线：只删 output/ 与 data/uploads、data/tmp 下的产物；
+    # 绝不触碰用户自己的源视频（如 Videos 目录）。
+    removed: list[str] = []
+    allow_marks = (os.sep + "uploads" + os.sep, os.sep + "output" + os.sep, os.sep + "tmp" + os.sep)
+    candidates = list(task.result_files or [])
+    candidates += [p + ".words.json" for p in list(task.result_files or [])]
+    src = getattr(task, "video_path", None)
+    if src and any(m in os.path.realpath(src) for m in allow_marks):
+        candidates.append(src)
+    for p in candidates:
+        try:
+            rp = os.path.realpath(p)
+            if not any(m in rp for m in allow_marks):
+                continue
+            if os.path.isfile(rp):
+                os.remove(rp)
+                removed.append(rp)
+        except OSError:
+            pass
+
     ok = await task_manager.delete_task(task_id)
-    return {"task_id": task_id, "purged": bool(ok), "message": "已彻底移除（磁盘文件仍保留）"}
+    return {"task_id": task_id, "purged": bool(ok), "message": "已彻底移除", "removed_files": removed}
 
 
 @app.get("/api/output/{filename}")
