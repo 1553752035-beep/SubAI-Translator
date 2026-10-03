@@ -323,8 +323,8 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
               ) : (
                 <div className="ph">原视频预览（当前环境不可播放，可直接打开原文件）</div>
               )}
-              {(liveRow ? textOf(liveRow) : textOf(rows[cur])) && (
-                <div className="w-cap">{(liveRow ? textOf(liveRow) : textOf(rows[cur]))}</div>
+              {liveRow && (
+                <div className="w-cap">{textOf(liveRow)}</div>
               )}
             </div>
             <div className="w-bar">
