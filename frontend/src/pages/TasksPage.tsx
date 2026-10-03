@@ -134,6 +134,7 @@ export function TasksPage() {
       try {
         const data = await getHistory({ limit: 100 });
         setTasks(data.tasks);
+        setSelectedIds((prev) => prev.filter((id) => data.tasks.some((t) => t.task_id === id)));
       } catch (error) {
         console.error('加载任务列表失败:', error);
       } finally {
@@ -151,6 +152,7 @@ export function TasksPage() {
         try {
           const data = await getHistory({ limit: 100 });
           setTasks(data.tasks);
+          setSelectedIds((prev) => prev.filter((id) => data.tasks.some((t) => t.task_id === id)));
         } catch {
           /* 忽略瞬时失败 */
         }
@@ -175,6 +177,7 @@ export function TasksPage() {
     try {
       const data = await getHistory({ limit: 100 });
       setTasks(data.tasks);
+      setSelectedIds((prev) => prev.filter((id) => data.tasks.some((t) => t.task_id === id)));
     } catch (error) {
       console.error('刷新任务列表失败:', error);
     } finally {
@@ -199,7 +202,6 @@ export function TasksPage() {
       setSelectedIds((res.failed || []).map((f) => f.task_id));
       await handleRefresh();
       if ((res.failed || []).length) window.alert('已删除 ' + res.ok + ' 个，' + res.failed.length + ' 个失败（已保留勾选，可重试）');
-      setSelectedIds([]);
       await handleRefresh();
     } catch (error: any) { const d = error?.response?.data?.detail || error?.message || String(error); console.error('删除失败:', error); window.alert('删除失败：' + d); }
   };
@@ -325,7 +327,7 @@ export function TasksPage() {
               <tr>
                 <th style={{ width: '36px' }}>
                   <input type="checkbox" title="全选"
-                    checked={filteredTasks.length > 0 && selectedIds.length === filteredTasks.length}
+                    checked={filteredTasks.length > 0 && filteredTasks.every((t) => selectedIds.includes(t.task_id))}
                     onChange={(e) => setSelectedIds(e.target.checked ? filteredTasks.map((t) => t.task_id) : [])} />
                 </th>
                 <th style={{ width: '120px' }}>任务 ID</th>
