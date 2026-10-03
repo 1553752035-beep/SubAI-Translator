@@ -282,7 +282,7 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
     const r = rows[cur];
     if (!r) return;
     const el = document.getElementById('subrow-' + r.id);
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (el && typeof el.scrollIntoView === "function") { if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   }, [cur, rows]);
 
   const save = async (silent = false) => {

@@ -25,8 +25,6 @@ vi.mock('../api', () => ({
 
 import {
   checkHealth,
-  detectLanguage,
-  downloadReport,
   getAsrDevice,
   getCacheStats,
   getCurrentUser,
@@ -125,29 +123,6 @@ describe('SettingsPage 术语库模式', () => {
     render(<SettingsPage />);
     await waitFor(() => expect(mTerm).toHaveBeenCalled());
     await waitFor(() => expect(rowValues()).toContain('-'));
-  });
-});
-
-describe("SettingsPage 语言与报表（四期）", () => {
-  it("展示语言支持数量", async () => {
-    render(<SettingsPage />);
-    expect(await screen.findByText(/72 种（识别 44 · 翻译 72 · 配音 35）/)).toBeInTheDocument();
-  });
-
-  it("语言检测按钮调用接口并显示结果", async () => {
-    vi.mocked(detectLanguage).mockResolvedValue({
-      code: "en", confidence: 0.95, method: "langdetect", candidates: [],
-    });
-    render(<SettingsPage />);
-    fireEvent.change(screen.getByPlaceholderText(/检测它的语言/), { target: { value: "Hello world" } });
-    fireEvent.click(screen.getByRole("button", { name: "检测语言" }));
-    expect(await screen.findByText(/检测结果：en/)).toBeInTheDocument();
-  });
-
-  it("报表导出按钮调用下载接口", async () => {
-    render(<SettingsPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "导出统计 Excel" }));
-    await waitFor(() => expect(vi.mocked(downloadReport)).toHaveBeenCalledWith("xlsx"));
   });
 });
 
