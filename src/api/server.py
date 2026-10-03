@@ -1578,22 +1578,26 @@ async def batch_delete_tasks(
     return {"ok": ok, "failed": failed}
 
 
-@app.delete("/api/task")
-async def delete_task_by_query(
-    task_id: str,
+@app.post("/api/tasks/purge")
+async def batch_purge_tasks(
+    request: BatchDeleteRequest,
     current_user: UserRecord = Depends(get_current_user)
 ):
-    """五期：删除任务（task_id 走 query，避免路径里的空格等特殊字符）。"""
-    return await delete_task(task_id=task_id, current_user=current_user)
+    """五期：批量彻底移除（body 传 ids，不会与路径路由冲突）。"""
+    ok = 0
+    failed: list[dict] = []
+    for tid in request.ids:
+        try:
+            res = await purge_task(task_id=tid, current_user=current_user)
+            if res:
+                ok += 1
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"task_id": tid, "error": str(exc)})
+    return {"ok": ok, "failed": failed}
 
 
-@app.delete("/api/task/purge")
-async def purge_task_by_query(
-    task_id: str,
-    current_user: UserRecord = Depends(get_current_user)
-):
-    """五期：彻底移除任务（task_id 走 query）。"""
-    return await purge_task(task_id=task_id, current_user=current_user)
+
+
 
 
 @app.delete("/api/task/{task_id}/purge")
