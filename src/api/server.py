@@ -1540,6 +1540,44 @@ async def delete_task(
     }
 
 
+class BatchDeleteRequest(BaseModel):
+    """五期：批量删除请求体。"""
+
+    ids: list[str] = Field(default_factory=list)
+
+
+@app.post("/api/tasks/delete")
+async def batch_delete_tasks(
+    request: BatchDeleteRequest,
+    current_user: UserRecord = Depends(get_current_user)
+):
+    """五期：批量删除（一次请求，服务端循环，返回成功/失败汇总）。"""
+    global task_manager
+
+    if task_manager is None:
+        raise RuntimeError("任务管理器未初始化")
+
+    ok = 0
+    failed: list[dict] = []
+    for tid in request.ids:
+        try:
+            task = await task_manager.get_task(tid, user_id=_scope_user_id(current_user))
+            if not task:
+                failed.append({"task_id": tid, "error": "任务不存在"})
+                continue
+            if task.status in ("completed", "failed"):
+                await task_manager.update_task(task_id=tid, status="archived", message="用户已归档")
+            else:
+                cancel_task_token(tid)
+                await task_manager.update_task(task_id=tid, status="cancelled",
+                                             message="用户已取消", error_message="cancelled by user")
+            ok += 1
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"task_id": tid, "error": str(exc)})
+
+    return {"ok": ok, "failed": failed}
+
+
 @app.delete("/api/task")
 async def delete_task_by_query(
     task_id: str,
