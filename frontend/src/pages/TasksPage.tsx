@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { deleteTask, cancelTask, getHistory } from '../api';
 import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
@@ -123,6 +123,9 @@ export function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<TaskRecord | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [dragFrom, setDragFrom] = useState<{ x: number; y: number } | null>(null);
+  const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
   const [showTrash, setShowTrash] = useState(false);
 
   // 加载历史记录
@@ -274,7 +277,45 @@ export function TasksPage() {
           暂无任务记录
         </div>
       ) : (
-        <div className="table-card" style={{ maxHeight: '62vh', overflowY: 'auto', overflowX: 'auto' }}>
+        <div
+          className="table-card"
+          ref={tableRef}
+          style={{ maxHeight: '62vh', overflowY: 'auto', overflowX: 'auto', position: 'relative' }}
+          onMouseDown={(e) => {
+            const el = e.target as HTMLElement;
+            if (el.closest('button') || el.closest('input') || el.closest('a')) return;
+            const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            setDragFrom({ x: e.clientX - box.left + (e.currentTarget as HTMLDivElement).scrollLeft, y: e.clientY - box.top + (e.currentTarget as HTMLDivElement).scrollTop });
+            setMarquee(null);
+          }}
+          onMouseMove={(e) => {
+            if (!dragFrom) return;
+            const box = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            setMarquee({ x1: dragFrom.x, y1: dragFrom.y, x2: e.clientX - box.left + (e.currentTarget as HTMLDivElement).scrollLeft, y2: e.clientY - box.top + (e.currentTarget as HTMLDivElement).scrollTop });
+          }}
+          onMouseUp={() => {
+            if (marquee && tableRef.current) {
+              const r = { l: Math.min(marquee.x1, marquee.x2), t: Math.min(marquee.y1, marquee.y2), rr: Math.max(marquee.x1, marquee.x2), b: Math.max(marquee.y1, marquee.y2) };
+              if (r.rr - r.l > 6 && r.b - r.t > 6) {
+                const hit: string[] = [];
+                tableRef.current.querySelectorAll('tr[data-id]').forEach((row) => {
+                  const rb = (row as HTMLElement).getBoundingClientRect();
+                  const cb = tableRef.current!.getBoundingClientRect();
+                  const y1 = rb.top - cb.top + tableRef.current!.scrollTop;
+                  const y2 = rb.bottom - cb.top + tableRef.current!.scrollTop;
+                  if (y2 >= r.t && y1 <= r.b) { const id = (row as HTMLElement).getAttribute('data-id'); if (id) hit.push(id); }
+                });
+                if (hit.length) setSelectedIds((prev) => Array.from(new Set([...prev, ...hit])));
+              }
+            }
+            setDragFrom(null);
+            setMarquee(null);
+          }}
+          onMouseLeave={() => { setDragFrom(null); setMarquee(null); }}
+        >
+          {marquee && (
+            <div style={{ position: 'absolute', left: Math.min(marquee.x1, marquee.x2), top: Math.min(marquee.y1, marquee.y2), width: Math.abs(marquee.x2 - marquee.x1), height: Math.abs(marquee.y2 - marquee.y1), border: '1px solid var(--accent, #5b4be0)', background: 'rgba(91,75,224,.12)', pointerEvents: 'none', zIndex: 5 }} />
+          )}
           <table>
             <thead>
               <tr>
@@ -295,7 +336,7 @@ export function TasksPage() {
             </thead>
             <tbody>
               {filteredTasks.map((task) => (
-                <tr key={task.task_id}>
+                <tr key={task.task_id} data-id={task.task_id}>
                   <td>
                     <input type="checkbox" checked={selectedIds.includes(task.task_id)}
                       onChange={(e) => setSelectedIds(e.target.checked ? [...selectedIds, task.task_id] : selectedIds.filter((x) => x !== task.task_id))} />
