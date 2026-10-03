@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { deleteTasks, purgeTask, cancelTask, getHistory } from '../api';
+import { deleteTasks, purgeTasks, purgeTask, cancelTask, getHistory } from '../api';
 import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
@@ -198,7 +198,7 @@ export function TasksPage() {
     if (selectedIds.length === 0) return;
     if (!window.confirm('确定删除选中的 ' + selectedIds.length + ' 个任务？')) return;
     try {
-      const res = await deleteTasks(selectedIds);
+      const res = showTrash ? await purgeTasks(selectedIds) : await deleteTasks(selectedIds);
       setSelectedIds((res.failed || []).map((f) => f.task_id));
       await handleRefresh();
       if ((res.failed || []).length) window.alert('已删除 ' + res.ok + ' 个，' + res.failed.length + ' 个失败（已保留勾选，可重试）');
