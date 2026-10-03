@@ -9,6 +9,7 @@ type Row = { id: string; start: number; end: number; source: string; translation
 type Act =
   | { kind: 'edit'; id: string; before: string; after: string }
   | { kind: 'merge'; ids: string[]; before: [Row, Row]; after: Row }
+  | { kind: 'time'; id: string; before: [number, number]; after: [number, number] }
   | { kind: 'split'; id: string; before: Row; after: [Row, Row] };
 
 const mmss = (t: number): string => {
@@ -33,6 +34,23 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
   const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [timeEdit, setTimeEdit] = useState<{ id: string; start: number; end: number } | null>(null);
+
+  /** 改时间：补字后缩短时长，避免字幕盖住没人说话的画（Ctrl+Z 可撤销） */
+  const commitTime = () => {
+    if (!timeEdit) return;
+    const r = rows.find((x) => x.id === timeEdit.id);
+    if (!r) { setTimeEdit(null); return; }
+    const st = Math.max(0, Math.min(timeEdit.start, timeEdit.end - 0.1));
+    const en = Math.max(st + 0.1, timeEdit.end);
+    if (Math.abs(st - r.start) > 0.001 || Math.abs(en - r.end) > 0.001) {
+      pushAct({ kind: 'time', id: r.id, before: [r.start, r.end], after: [st, en] });
+      setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, start: st, end: en } : x)));
+      setDirty((d) => ({ ...d, [r.id]: true }));
+      setMsg('已改时间（记得保存草稿或确认出片）');
+    }
+    setTimeEdit(null);
+  };
   const [videoUrl, setVideoUrl] = useState('');
   const [vt, setVt] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -211,6 +229,11 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
   const undo = () => {
     const a = stackRef.current.pop();
     if (!a) { setMsg('没有可撤销的操作'); return; }
+    if (a.kind === 'time') {
+      setRows((prev) => prev.map((x) => (x.id === a.id ? { ...x, start: a.before[0], end: a.before[1] } : x)));
+      setMsg('已撤销时间修改');
+      return;
+    }
     if (a.kind === 'edit') {
       setRows((prev) => prev.map((x) => (x.id === a.id ? { ...x, translation: a.before } : x)));
       setDirty((d) => ({ ...d, [a.id]: false }));
@@ -359,7 +382,26 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
               onClick={() => { if (!isEd) { setCur(i); setMenuFor(null); } }}
               onDoubleClick={() => startEdit(i)}
             >
-              <div className="w-time">{isCur ? '▶ ' : ''}{mmss(r.start) + ' → ' + mmss(r.end)}</div>
+              {timeEdit && timeEdit.id === r.id ? (
+                <div className="w-time-edit" onClick={(e) => e.stopPropagation()}>
+                  <input type="number" step="0.1" value={timeEdit.start}
+                    onChange={(e) => setTimeEdit({ ...timeEdit, start: Number(e.target.value) })}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitTime(); }} />
+                  <span>→</span>
+                  <input type="number" step="0.1" value={timeEdit.end}
+                    onChange={(e) => setTimeEdit({ ...timeEdit, end: Number(e.target.value) })}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitTime(); }} />
+                  <button className="w-btn w-ghost" style={{ padding: "2px 8px" }} onClick={commitTime}>保存</button>
+                </div>
+              ) : (
+                <div
+                  className="w-time"
+                  title="点一下可改时间（补字后缩短时长）"
+                  onClick={(e) => { e.stopPropagation(); setCur(i); setTimeEdit({ id: r.id, start: Math.round(r.start * 10) / 10, end: Math.round(r.end * 10) / 10 }); }}
+                >
+                  {isCur ? "▶ " : ""}{mmss(r.start)} → {mmss(r.end)}
+                </div>
+              )}
               <div className="w-text">
                 {isEd && splitting && splitting.id === r.id && (
                   <span className="w-split-hint">光标处按 Ctrl+Enter 拆分</span>

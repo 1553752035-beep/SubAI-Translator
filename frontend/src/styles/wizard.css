@@ -150,3 +150,7 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-subrow{flex-wrap:wrap}
 .w-splitpanel{flex:1 0 100% !important;margin:8px 0 4px !important}
 .w-subrow .w-text{min-width:0}
+.w-time{cursor:pointer;border-radius:6px;padding:2px 4px}
+.w-time:hover{background:var(--w-soft);color:var(--w-accent)}
+.w-time-edit{display:flex;align-items:center;gap:4px;font-size:11.5px}
+.w-time-edit input{width:58px;padding:2px 4px;font-size:12px;border:1px solid var(--w-line2);border-radius:6px;background:var(--w-bg2);color:var(--w-text)}
