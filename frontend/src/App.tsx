@@ -281,7 +281,7 @@ export default function App() {
   if (confirmTask) {
     return (
       <div className="w-app">
-        <div className="w-wrap">
+        <div className="w-conf-wrap">
           <SimpleSubtitleEditor taskId={confirmTask} onClose={() => setConfirmTask(null)} />
         </div>
       </div>

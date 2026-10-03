@@ -136,3 +136,11 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-conf-foot{margin-top:16px;display:flex;justify-content:flex-end;align-items:center;gap:12px}
 .w-conf-foot .stat{color:var(--w-dim);font-size:13px}
 @media(max-width:900px){.w-conf-grid{grid-template-columns:1fr}}
+/* 五期：确认页更宽的容器（原来塞进 780px 的向导容器里显得很小） */
+.w-conf-wrap{max-width:1180px;margin:0 auto;padding:22px 26px 48px}
+.w-conf .w-h2{font-size:22px}
+.w-conf-stat{font-size:14px}
+.w-conflist{font-size:15px}
+.w-subrow{min-height:42px}
+.w-text{font-size:15px}
+.w-time{font-size:12px}
