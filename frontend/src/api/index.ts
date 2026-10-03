@@ -255,7 +255,7 @@ export const deleteTask = async (taskId: string): Promise<void> => {
 
 /** 五期：从回收站彻底移除任务记录（后端不动磁盘文件） */
 export const purgeTask = async (taskId: string): Promise<void> => {
-  await api.delete('/task/purge', { params: { task_id: taskId } });
+  await api.post('/tasks/purge', { ids: [taskId] });
 };
 export const getHistory = async (params?: {
   status?: string;
