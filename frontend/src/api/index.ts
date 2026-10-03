@@ -29,7 +29,7 @@ import type {
   DeliveryInfo,
 } from '../types';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = 'http://127.0.0.1:8000/api';   // 五期：用 127.0.0.1 而非 localhost，避开 IPv6/系统代理导致的 Network Error
 const TOKEN_KEY = 'subai_access_token';
 
 // --------------------------------------------------------------------------- //
