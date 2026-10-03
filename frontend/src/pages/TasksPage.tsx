@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { deleteTask, purgeTask, cancelTask, getHistory } from '../api';
+import { deleteTasks, purgeTask, cancelTask, getHistory } from '../api';
 import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
@@ -186,7 +186,7 @@ export function TasksPage() {
   const handleDelete = async (taskId: string) => {
     const isTrash = showTrash;
     if (!window.confirm(isTrash ? '彻底删除这个任务？\n\n会一起删掉：本任务产出的视频与字幕文件。\n（你自己「视频」文件夹里的源视频不会被删）' : '确定删除这个任务？删除后可在「回收站」查看。')) return;
-    try { if (isTrash) { await purgeTask(taskId); } else { await deleteTask(taskId); } await handleRefresh(); }
+    try { if (isTrash) { await purgeTask(taskId); } else { await deleteTasks([taskId]); } await handleRefresh(); }
     catch (error: any) { const d = error?.response?.data?.detail || error?.message || String(error); console.error('删除失败:', error); window.alert('删除失败：' + d); }
   };
 
@@ -195,7 +195,10 @@ export function TasksPage() {
     if (selectedIds.length === 0) return;
     if (!window.confirm('确定删除选中的 ' + selectedIds.length + ' 个任务？')) return;
     try {
-      for (const id of selectedIds) { await deleteTask(id); }
+      const res = await deleteTasks(selectedIds);
+      setSelectedIds((res.failed || []).map((f) => f.task_id));
+      await handleRefresh();
+      if ((res.failed || []).length) window.alert('已删除 ' + res.ok + ' 个，' + res.failed.length + ' 个失败（已保留勾选，可重试）');
       setSelectedIds([]);
       await handleRefresh();
     } catch (error: any) { const d = error?.response?.data?.detail || error?.message || String(error); console.error('删除失败:', error); window.alert('删除失败：' + d); }
