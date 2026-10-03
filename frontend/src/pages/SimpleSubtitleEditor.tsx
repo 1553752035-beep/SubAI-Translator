@@ -160,7 +160,7 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
     const a = dir === 'up' ? rows[j] : rows[i];
     const b = dir === 'up' ? rows[i] : rows[j];
     const merged: Row = {
-      id: a.id,
+      id: newId(),   // 五期：合并行必须用全新 id，否则与撤销后恢复的行同 id，按 id 撤销会产生歧义
       start: a.start,
       end: b.end,
       source: (a.source || '') + (b.source || ''),
@@ -168,9 +168,10 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
       words: [...(a.words || [a.start]), ...(b.words || [b.end])],
     };
     pushAct({ kind: 'merge', ids: [a.id, b.id], before: [a, b], after: merged });
-    setRows((prev) => { const next = [...prev]; next.splice(j, 2, merged); return next; });
+    // 五期修复：向下合并时 j=i+1，必须从 i 开始删两行；原写成 splice(j,2) 会删掉后面的行
+    setRows((prev) => { const next = [...prev]; next.splice(Math.min(i, j), 2, merged); return next; });
     setDirty((d) => { const n = { ...d }; delete n[a.id]; delete n[b.id]; n[merged.id] = true; return n; });
-    setCur(j);
+    setCur(Math.min(i, j));
     setMsg('已合并两行（Ctrl+Z 可撤销）');
   };
 
