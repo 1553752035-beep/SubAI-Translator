@@ -144,3 +144,5 @@ html.light{--w-bg:#f5f6fa;--w-bg2:#ffffff;--w-bg3:#f0f2f8;--w-line:#e8ebf3;--w-l
 .w-subrow{min-height:42px}
 .w-text{font-size:15px}
 .w-time{font-size:12px}
+.w-player .w-cap{position:absolute;bottom:56px;left:0;right:0;text-align:center;color:#fff;font-size:19px;text-shadow:0 1px 4px rgba(0,0,0,.95);padding:0 18px;pointer-events:none}
+.w-bar .dot{width:11px;height:11px;top:0;border:2px solid var(--w-bg2);z-index:3}

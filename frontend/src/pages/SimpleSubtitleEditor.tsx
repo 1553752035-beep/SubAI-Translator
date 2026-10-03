@@ -34,6 +34,8 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
   const [dragging, setDragging] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
+  const [vt, setVt] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const stackRef = useRef<Act[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -93,6 +95,25 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
     return '';
   };
   const suspectCount = rows.filter((r) => !!suspectOf(r)).length;
+  /** 跳到某行：选中 + 视频 seek（内置播放器直接看到那句话） */
+  const gotoRow = (i: number) => {
+    setCur(i);
+    setMenuFor(null);
+    const r = rows[i];
+    if (r && videoRef.current) { try { videoRef.current.currentTime = r.start; } catch { /* 忽略 */ } }
+  };
+
+  /** 跳到下一处可疑（兜底入口） */
+  const jumpNextSuspect = () => {
+    for (let k = 1; k <= rows.length; k += 1) {
+      const i = (cur + k) % rows.length;
+      if (suspectOf(rows[i])) { gotoRow(i); setMsg("已跳到下一处可疑"); return; }
+    }
+    setMsg("没有可疑的句子了");
+  };
+
+  const liveRow = rows.find((r) => vt >= r.start && vt <= r.end) || null;
+
 
   const pushAct = (a: Act) => { stackRef.current.push(a); };
 
@@ -291,16 +312,30 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
         <div>
           <div className="w-conf-card" style={{ padding: 14 }}>
             <div className="w-player">
-              {videoUrl ? <video src={videoUrl} controls preload="metadata" /> : <div className="ph">原视频预览（当前环境不可播放，可直接打开原文件）</div>}
+              {videoUrl ? (
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  preload="metadata"
+                  onTimeUpdate={(e) => setVt((e.currentTarget as HTMLVideoElement).currentTime)}
+                />
+              ) : (
+                <div className="ph">原视频预览（当前环境不可播放，可直接打开原文件）</div>
+              )}
+              {(liveRow ? textOf(liveRow) : textOf(rows[cur])) && (
+                <div className="w-cap">{(liveRow ? textOf(liveRow) : textOf(rows[cur]))}</div>
+              )}
             </div>
             <div className="w-bar">
               {rows.map((r2) => (
                 <span key={r2.id} className="seg" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%', width: ((Math.max(0.05, r2.end - r2.start) / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} />
               ))}
-              {rows.map((r2, k) => (suspectOf(r2) ? <span key={'d' + r2.id} className="dot" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} title={'可疑：' + textOf(r2)} onClick={() => setCur(k)} /> : null))}
+              {rows.map((r2, k) => (suspectOf(r2) ? <span key={'d' + r2.id} className="dot" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} title={'可疑：' + textOf(r2)} onClick={(e) => { e.stopPropagation(); gotoRow(k); }} /> : null))}
               <span className="head" style={{ left: (((rows[cur] ? rows[cur].start : 0) / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} />
             </div>
             <div className="w-legend">
+              <button className="w-btn w-ghost" style={{ padding: '3px 10px', fontSize: 12 }} onClick={jumpNextSuspect}>下一处可疑 ↓</button>
               <span><s />有字幕</span>
               <span><i />可疑（点黄点跳过去）</span>
               <span style={{ color: 'var(--w-accent)' }}>▶ 当前行</span>
