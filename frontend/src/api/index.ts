@@ -242,6 +242,12 @@ export const cancelTask = async (taskId: string) => {
 
 // 后端返回 { tasks, total }，不是数组
 /** 五期：删除任务（后端已有 DELETE /api/task/{id}） */
+/** 五期：批量删除——一次请求，服务端循环；id 在 body 里，不受路径编码影响 */
+export const deleteTasks = async (ids: string[]): Promise<{ ok: number; failed: { task_id: string; error: string }[] }> => {
+  const r = await api.post('/tasks/delete', { ids });
+  return (r.data || { ok: 0, failed: [] }) as { ok: number; failed: { task_id: string; error: string }[] };
+};
+
 export const deleteTask = async (taskId: string): Promise<void> => {
   await api.delete('/task', { params: { task_id: taskId } });   // 五期：走 query，避开路径特殊字符
 };
