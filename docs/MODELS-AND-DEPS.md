@@ -125,7 +125,62 @@ config.json / preprocessor_config.json / README.md
 
 ---
 
-## 五、Node.js（前端构建）
+### 已删除：Qwen3.6-35B-A3B（本地代码开发用，2026-10-25 移除）
+
+这个模型**不是 SubAI 项目的依赖**，是准备用来做本地代码开发的。
+项目选型文档里从未出现它（本地翻译用的是 Hy-MT2-1.8B 基座）。
+2026-10-25 删除以腾出空间，以下是完整还原信息。
+
+**删除时记录的文件事实**（读 GGUF 头部得到，不是猜的）：
+
+```
+文件名      Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+大小        22,134,528,992 字节 (20.61 GB)
+原位置      D:\AI\KoboldCpp\models\
+GGUF 版本   3
+张量数      733
+元数据项    54
+架构        qwen35moe      ← MoE 结构
+模型名      Qwen3.6-35B-A3B
+规模标签    35B-A3B        ← 总参 35B，激活 3B
+许可        apache-2.0
+```
+
+**上游来源**：[Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
+（Apache-2.0，可商用）。
+
+**量化版本**：`UD-Q4_K_M` 里的 `UD` 是 Unsloth Dynamic 量化的标记，
+即 `unsloth/Qwen3.6-35B-A3B-GGUF` 仓库的 UD-Q4_K_M 档。
+下载时认准文件名里的 `UD-Q4_K_M`，普通的 `Q4_K_M` 是另一种量化，大小和表现都不同。
+
+**重新下载**（国内用镜像，注意 UA 和 download=true 两个坑，见第二节）：
+
+```bash
+# 官方
+curl -L -H "User-Agent: Mozilla/5.0"   "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf?download=true"   -o Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+
+# 国内镜像
+curl -L -H "User-Agent: Mozilla/5.0"   "https://hf-mirror.com/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf?download=true"   -o Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+```
+
+**跑起来**（本机 RTX 4070 Laptop，8 GB 显存 —— 装不下 20.6 GB，必然走 CPU 卸载）：
+
+```bash
+cd D:\AI\KoboldCpp
+koboldcpp.exe --model models\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf   --port 5001 --contextsize 8192 --gpulayers 20 --usecublas
+```
+
+`--gpulayers` 需要实测调：20 层大概是 8 GB 显存的极限，
+再高会 OOM，再低就纯 CPU（很慢）。MoE 结构的好处是激活参数只有 3B，
+**CPU 推理比同规模稠密模型快得多**，实际可用性比 35B 这个数字看起来好。
+
+**如果要接进 SubAI 做本地翻译**：改 `.env` 的 `SUBAI_LLM_LOCAL_URL` 指向这个端点即可，
+但**不建议** —— 项目实测 Hy-MT2-1.8B 在字幕短句上更准（2/33 错译 vs 通用模型通常更差），
+而且快得多。这个模型适合的是**代码补全/长文推理**，不是字幕翻译。
+
+---
+
+## 六、Node.js（前端构建）
 
 位置：`tools/nodejs/`（123 MB）
 
@@ -136,7 +191,7 @@ config.json / preprocessor_config.json / README.md
 
 ---
 
-## 六、前端依赖
+## 七、前端依赖
 
 位置：`frontend/node_modules/`（约 700 MB，已被 `.gitignore` 排除）
 
@@ -151,7 +206,7 @@ npm ci        # 严格按 package-lock.json 装，版本完全一致
 
 ---
 
-## 七、系统依赖
+## 八、系统依赖
 
 | 依赖 | 用途 | 说明 |
 |---|---|---|
@@ -164,7 +219,7 @@ npm ci        # 严格按 package-lock.json 装，版本完全一致
 
 ---
 
-## 八、完整还原步骤
+## 九、完整还原步骤
 
 假设代码已经从 GitHub clone 下来，从零还原到可运行：
 
@@ -206,7 +261,7 @@ cd frontend && npx vitest run
 
 ---
 
-## 九、删之前该确认的事
+## 十、删之前该确认的事
 
 删除任何模型前，逐条确认：
 
@@ -219,7 +274,7 @@ cd frontend && npx vitest run
 
 ---
 
-## 十、验证清单（还原后跑一遍）
+## 十一、验证清单（还原后跑一遍）
 
 ```bash
 # ASR 引擎是否都能加载
