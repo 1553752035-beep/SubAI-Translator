@@ -305,3 +305,28 @@ C:\...\AppData\Roaming\subai\.env
 ```
 
 仓库是 **public**，这一点已逐字节核对确认。
+
+---
+
+## 十一、Tauri 更新签名密钥（已单独备份）
+
+`C:\Users\Administrator\.tauri\` 下有一对**更新签名密钥**（2026-10-02 生成）：
+
+```
+subai-updater.key       348 B   私钥（无密码）
+subai-updater.key.pub   152 B   公钥
+```
+
+**这对密钥不是垃圾，删了就没了。** `RELEASE.md` 第 228 行的原话：
+
+> ⚠️ 私钥丢失 = 已安装的旧版本再也收不到更新（只能换新公钥、重新装机）；
+> 私钥泄露 = 他人可伪造更新包。
+
+公钥已硬编码在 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 里，
+私钥只在**发版时签更新包**用。
+
+**已备份到**：`D:\SubAI-Keys-Backup\`（含 README 说明）
+
+> 这份私钥**不能进公开仓库** —— 泄露等于他人可伪造更新包。
+
+如果确定不再发版，可以连同 `.tauri\` 一起删掉；从源码重新打包不需要它。
