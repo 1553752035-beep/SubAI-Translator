@@ -5,7 +5,37 @@ export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'ca
 export type TaskMode = 'asr' | 'hardsub';
 
 // 输出格式
-export type OutputFormat = 'srt' | 'vtt' | 'ass' | 'json';
+/**
+ * 输出字幕格式。
+ * [2026-10-25] 新增 lrc（只有起始时间，点歌词用）与 txt（无时间轴，纯文本分发）。
+ * 对齐同类项目 SmartSub 的格式覆盖（其支持 srt/vtt/ass/lrc/txt 五种）。
+ */
+export type OutputFormat = 'srt' | 'vtt' | 'ass' | 'json' | 'lrc' | 'txt';
+
+/**
+ * 硬字幕样式表单。
+ *
+ * 与后端 src/subtitle_style.py::SubtitleStyle 字段对应，但**全部可选**：
+ * 未填的项由后端回落默认值（对齐 ffmpeg 的 SRT 隐式样式，保证观感零回归）。
+ * 这样「只改个颜色」的用户不必被迫填一堆字段。
+ */
+export interface SubtitleStyleForm {
+  font_family?: string;
+  font_size?: number;
+  primary_color?: string;
+  outline_color?: string;
+  back_color?: string;
+  outline?: number;
+  shadow?: number;
+  /** numpad 对齐：7/8/9 上排，1/2/3 下排，2 = 底部居中 */
+  alignment?: number;
+  margin_v?: number;
+  bold?: boolean;
+  italic?: boolean;
+  /** 1 = 仅描边，3 = 半透明背景框 */
+  border_style?: number;
+  back_opacity?: number;
+}
 
 // 任务记录（created_at / updated_at / completed_at 为后端返回的 ISO 字符串）
 export interface TaskRecord {
@@ -24,6 +54,61 @@ export interface TaskRecord {
   completed_at: string | null;
   error_message: string | null;
   user_id?: string | null;
+  /** 任务指标。coverage 为 [2026-10-25] 新增：语音覆盖率与未覆盖区间。 */
+  metrics?: TaskMetrics;
+}
+
+/** 未覆盖区间（有人说话但没出字幕，或确实静默）。 */
+export interface CoverageGap {
+  start: number;
+  end: number;
+  sec: number;
+}
+
+/**
+ * 语音覆盖率统计。
+ *
+ * 口径注意：`coverage_pct` 是「字幕覆盖时长 / 音频总时长」，
+ * 能反映漏识别，但**不等于** VAD 检出段的保留比例。
+ * `gaps` 里的区间既可能是「真没人说话」，也可能是「有人说话但没识别出来」，
+ * 现有信息无法区分，所以界面文案必须写「未覆盖」而不是「漏识别」。
+ */
+export interface CoverageStats {
+  duration: number;
+  covered: number;
+  coverage_pct: number;
+  blank: number;
+  gaps: CoverageGap[];
+  gap_min_sec: number;
+  warn: boolean;
+}
+
+export interface TaskMetrics {
+  lines_total?: number;
+  lines_failed?: number;
+  terms_hit?: number;
+  cache_hits?: number;
+  llm_requests?: number;
+  files?: number;
+  coverage?: CoverageStats;
+  /** 说话人分离统计（开启分离且有模型时才有） */
+  diarization?: DiarizationStats;
+}
+
+/**
+ * 说话人分离统计。
+ *
+ * 注意 speaker_count 与 speakers_in_rows 的差别：
+ * - speaker_count  = 模型认为这个视频里有几个人（看分离结果）
+ * - speakers_in_rows = 实际上有多少人「分到了字幕行」
+ * 某个说话人整段都是背景音时，后者会小于前者 —— 这是正常现象。
+ */
+export interface DiarizationStats {
+  speaker_count: number;
+  speakers_in_rows?: number;
+  labeled: number;
+  unlabeled: number;
+  segments: number;
 }
 
 // GET /api/history 响应

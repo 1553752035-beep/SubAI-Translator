@@ -51,16 +51,32 @@ def build_burn_command(
     crf: int = 18, preset: str = "medium",
     font_name: Optional[str] = None, font_size: Optional[int] = None,
     hwaccel: Optional[str] = None,
+    style: "object | None" = None,
 ) -> list[str]:
-    """构造硬字幕烧录命令（不含 ffmpeg 可执行文件本身与全局参数）。"""
+    """构造硬字幕烧录命令（不含 ffmpeg 可执行文件本身与全局参数）。
+
+    [2026-10-25] 新增 `style` 参数：完整的 SubtitleStyle（颜色/描边/阴影/位置/
+    背景框等）。不传时退回旧的 font_name/font_size 行为，**保证既有调用零改动**。
+
+    样式串由 subtitle_style.build_force_style() 统一生成，
+    与「生成 ASS 文件」走同一份代码，避免两条路径观感不一致。
+    """
     filt = "subtitles='%s'" % escape_filter_path(subtitle)
-    style = []
-    if font_name:
-        style.append("FontName=%s" % font_name)
-    if font_size:
-        style.append("FontSize=%d" % int(font_size))
-    if style:
-        filt += ":force_style='%s'" % ",".join(style)
+    if style is not None:
+        try:
+            from src.subtitle_style import build_force_style
+            filt += ":force_style='%s'" % build_force_style(style)  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001
+            # 样式构造失败不能让烧录整体失败：退回无样式（ffmpeg 用 SRT 隐含默认）
+            pass
+    else:
+        style_parts = []
+        if font_name:
+            style_parts.append("FontName=%s" % font_name)
+        if font_size:
+            style_parts.append("FontSize=%d" % int(font_size))
+        if style_parts:
+            filt += ":force_style='%s'" % ",".join(style_parts)
 
     args: list[str] = []
     if hwaccel:
@@ -80,6 +96,7 @@ def burn_hardsub(
     crf: int = 18, preset: str = "medium",
     font_name: Optional[str] = None, font_size: Optional[int] = None,
     hwaccel: Optional[str] = None, timeout: int = _FFMPEG_TIMEOUT,
+    style: "object | None" = None,
 ) -> str:
     """把字幕硬烧录进画面，返回输出路径；失败抛 RuntimeError。"""
     if not os.path.isfile(video):
@@ -90,7 +107,8 @@ def burn_hardsub(
 
     cmd = build_burn_command(
         video, subtitle, out_path,
-        crf=crf, preset=preset, font_name=font_name, font_size=font_size, hwaccel=hwaccel,
+        crf=crf, preset=preset, font_name=font_name, font_size=font_size,
+        hwaccel=hwaccel, style=style,
     )
     r = _run(cmd, timeout=timeout)
     if r.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
@@ -102,10 +120,21 @@ def burn_hardsub(
 # 软字幕封装
 # --------------------------------------------------------------------------- #
 
-def build_mux_command(video: str, tracks: list[dict], out_path: str) -> list[str]:
+def build_mux_command(video: str, tracks: list[dict], out_path: str,
+                      fonts: Optional[list] = None) -> list[str]:
     """构造软字幕封装命令。
 
     tracks: [{"path": str, "language": str|None, "title": str|None, "default": bool|None}]
+    fonts:  可选，要内嵌的字体文件路径列表（[2026-10-25] 新增）
+
+    [2026-10-25] 字体内嵌：把 TTF/OTF 作为 attachment 塞进 MKV。
+    动机：ASS 字幕只记录**字体名**，渲染时靠播放器去系统里找 ——
+    自己做好的字幕发给别人，对方没这个字体就掉成默认字体，
+    安卓电视/手机播放器字体集小，中文字幕经常掉成方框。
+    内嵌后 libass/mpv/VLC 会自动加载，任何设备都能正确渲染。
+
+    只在 MKV 生效（MP4 容器不支持 attachment）。非 .mkv 输出时静默忽略 fonts，
+    而不是报错 —— 用户要 mp4 是他自己的选择，不该因此拿不到字幕。
     """
     args: list[str] = ["-i", video]
     for t in tracks:
@@ -126,12 +155,27 @@ def build_mux_command(video: str, tracks: list[dict], out_path: str) -> list[str
 
     if tracks:
         args += ["-disposition:s:0", "default"]
+
+    # 字体内嵌（仅 MKV）：attach 必须放在输出路径之前
+    if fonts and out_path.lower().endswith((".mkv", ".mka")):
+        try:
+            from src.fonts import build_attach_args
+            args += build_attach_args(list(fonts))
+        except Exception:  # noqa: BLE001
+            # 内嵌失败不能让出片失败：没有内嵌的字幕在本机照样能播
+            pass
+
     args += [out_path]
     return args
 
 
-def mux_softsub(video: str, tracks: list[dict], out_path: str, *, timeout: int = _FFMPEG_TIMEOUT) -> str:
-    """把一条或多条字幕封装成软字幕轨，返回输出路径；失败抛 RuntimeError。"""
+def mux_softsub(video: str, tracks: list[dict], out_path: str, *,
+                fonts: Optional[list] = None,
+                timeout: int = _FFMPEG_TIMEOUT) -> str:
+    """把一条或多条字幕封装成软字幕轨，返回输出路径；失败抛 RuntimeError。
+
+    fonts: 可选，要内嵌进 MKV 的字体文件列表（仅 MKV 生效）。
+    """
     if not tracks:
         raise ValueError("至少需要一条字幕轨")
     if not os.path.isfile(video):
@@ -141,7 +185,7 @@ def mux_softsub(video: str, tracks: list[dict], out_path: str, *, timeout: int =
             raise FileNotFoundError("字幕不存在: %s" % t["path"])
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
-    r = _run(build_mux_command(video, tracks, out_path), timeout=timeout)
+    r = _run(build_mux_command(video, tracks, out_path, fonts=fonts), timeout=timeout)
     if r.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         raise RuntimeError("软字幕封装失败: %s" % (r.stderr or "").strip()[:500])
     return out_path

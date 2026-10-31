@@ -6,10 +6,11 @@ import {
   getTaskSubtitles,
   getVoices,
   muxSoftsub,
+  getEmbeddableFonts,
 } from '../api';
-import type { TaskRecord, Voice } from '../types';
+import type { SubtitleStyleForm, TaskRecord, Voice } from '../types';
 
-const SUB_EXTS = ['.srt', '.ass', '.vtt'];
+const SUB_EXTS = ['.srt', '.ass', '.vtt', '.lrc'];
 
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p;
 
@@ -39,6 +40,14 @@ export const MediaTools = ({ task }: Props) => {
   const [subPath, setSubPath] = useState('');
   const [crf, setCrf] = useState(18);
   const [fontSize, setFontSize] = useState('');
+  // [2026-10-25] 完整字幕样式（颜色/描边/阴影/位置/背景框）。
+  // 与后端 SubtitleStyle 字段一一对应；空字符串表示「用后端默认值」。
+  const [style, setStyle] = useState<SubtitleStyleForm>({});
+  const [showStyle, setShowStyle] = useState(false);
+  // [2026-10-25] 字体内嵌：ASS 只记录字体名，播放端没装就掉默认字体。
+  // 存成字体族名，由后端解析成实际文件路径。
+  const [embedFont, setEmbedFont] = useState('');
+  const [fontChoices, setFontChoices] = useState<{ family: string; path: string; size: number }[]>([]);
   const [busy, setBusy] = useState<Busy>('');
   const [error, setError] = useState('');
   const [burnOut, setBurnOut] = useState('');
@@ -59,6 +68,21 @@ export const MediaTools = ({ task }: Props) => {
   useEffect(() => {
     setSubPath((prev) => (subs.includes(prev) ? prev : subs[0] ?? ''));
   }, [subs]);
+
+  // 可内嵌字体：只在封装面板展开时拉一次，失败就静默留空（不影响封装主流程）
+  useEffect(() => {
+    let alive = true;
+    getEmbeddableFonts()
+      .then((r) => {
+        if (alive) setFontChoices(r.available || []);
+      })
+      .catch(() => {
+        if (alive) setFontChoices([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -97,6 +121,7 @@ export const MediaTools = ({ task }: Props) => {
         subtitle_path: subPath,
         crf,
         ...(fontSize ? { font_size: Number(fontSize) } : {}),
+        ...(Object.keys(style).length ? { style } : {}),
       });
       setBurnOut(r.filename);
       return r.filename;
@@ -107,6 +132,8 @@ export const MediaTools = ({ task }: Props) => {
       const r = await muxSoftsub({
         video_path: task.video_path,
         tracks: subs.map((p) => ({ path: p, title: baseName(p) })),
+        // 只有勾了「内嵌字体」才传，否则请求体与改动前完全一致
+        ...(embedFont ? { embed_fonts: [embedFont] } : {}),
       });
       setMuxOut(r.filename);
       return r.filename;
@@ -175,6 +202,87 @@ export const MediaTools = ({ task }: Props) => {
                  onChange={(e) => setFontSize(e.target.value)} placeholder="默认"
                  style={{ width: '80px' }} />
         </div>
+        <details
+          open={showStyle}
+          onToggle={(e) => setShowStyle((e.target as HTMLDetailsElement).open)}
+          style={{ marginBottom: '8px', fontSize: '13px' }}
+        >
+          <summary style={{ cursor: 'pointer', color: 'var(--text-dim)' }}>
+            字幕样式（颜色 / 描边 / 阴影 / 位置）
+          </summary>
+          <div style={{ marginTop: '8px', display: 'grid', gap: '8px', gridTemplateColumns: '1fr 1fr' }}>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>字体</span>
+              <input aria-label="样式字体" value={style.font_family ?? ''} placeholder="Microsoft YaHei"
+                     onChange={(e) => setStyle({ ...style, font_family: e.target.value })}
+                     style={{ width: '100%' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>字号</span>
+              <input aria-label="样式字号" type="number" min={8} max={200}
+                     value={style.font_size ?? ''} placeholder="20"
+                     onChange={(e) => setStyle({ ...style, font_size: e.target.value === '' ? undefined : Number(e.target.value) })}
+                     style={{ width: '100%' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>文字色</span>
+              <input aria-label="文字颜色" type="color" value={style.primary_color ?? '#FFFFFF'}
+                     onChange={(e) => setStyle({ ...style, primary_color: e.target.value })}
+                     style={{ width: '100%', height: '28px' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>描边色</span>
+              <input aria-label="描边颜色" type="color" value={style.outline_color ?? '#000000'}
+                     onChange={(e) => setStyle({ ...style, outline_color: e.target.value })}
+                     style={{ width: '100%', height: '28px' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>描边宽</span>
+              <input aria-label="描边宽度" type="number" min={0} max={10} step={0.5}
+                     value={style.outline ?? ''} placeholder="2"
+                     onChange={(e) => setStyle({ ...style, outline: e.target.value === '' ? undefined : Number(e.target.value) })}
+                     style={{ width: '100%' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>阴影</span>
+              <input aria-label="阴影" type="number" min={0} max={10} step={0.5}
+                     value={style.shadow ?? ''} placeholder="0"
+                     onChange={(e) => setStyle({ ...style, shadow: e.target.value === '' ? undefined : Number(e.target.value) })}
+                     style={{ width: '100%' }} />
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>位置</span>
+              <select aria-label="字幕位置" value={style.alignment ?? 2}
+                      onChange={(e) => setStyle({ ...style, alignment: Number(e.target.value) })}
+                      style={{ width: '100%' }}>
+                <option value={7}>顶部左</option>
+                <option value={8}>顶部中</option>
+                <option value={9}>顶部右</option>
+                <option value={1}>底部左</option>
+                <option value={2}>底部中</option>
+                <option value={3}>底部右</option>
+              </select>
+            </div>
+            <div>
+              <span style={{ ...label, minWidth: '60px' }}>背景框</span>
+              <select aria-label="背景框" value={style.border_style ?? 1}
+                      onChange={(e) => setStyle({ ...style, border_style: Number(e.target.value) })}
+                      style={{ width: '100%' }}>
+                <option value={1}>仅描边</option>
+                <option value={3}>半透明背景框</option>
+              </select>
+            </div>
+            {style.border_style === 3 && (
+              <div>
+                <span style={{ ...label, minWidth: '60px' }}>不透明度</span>
+                <input aria-label="背景不透明度" type="number" min={0} max={100}
+                       value={style.back_opacity ?? 50}
+                       onChange={(e) => setStyle({ ...style, back_opacity: Number(e.target.value) })}
+                       style={{ width: '100%' }} />
+              </div>
+            )}
+          </div>
+        </details>
         <button className="btn" disabled={busy !== '' || !subPath} onClick={() => void doBurn()}>
           {busy === 'burn' ? '压制中…' : '开始压制'}
         </button>
@@ -191,6 +299,26 @@ export const MediaTools = ({ task }: Props) => {
         <div style={{ fontSize: '13px', color: 'var(--text-dim)', marginBottom: '8px' }}>
           将封装 {subs.length} 条字幕轨：{subs.map(baseName).join('、')}
         </div>
+        {fontChoices.length > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <span style={{ marginRight: '8px', fontSize: '13px' }}>内嵌字体</span>
+            <select
+              className="auth-input"
+              style={{ display: 'inline-block', width: 'auto', minWidth: '190px' }}
+              aria-label="内嵌字体"
+              value={embedFont}
+              onChange={(e) => setEmbedFont(e.target.value)}
+            >
+              <option value="">不内嵌</option>
+              {fontChoices.map((f) => (
+                <option key={f.family} value={f.family}>{f.family}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '4px' }}>
+              把字体打进 MKV。ASS 只记录字体名，对方没装就会掉成默认字体或方框。
+            </div>
+          </div>
+        )}
         <button className="btn" disabled={busy !== ''} onClick={() => void doMux()}>
           {busy === 'mux' ? '封装中…' : '开始封装'}
         </button>

@@ -109,6 +109,13 @@ class _MockLLM:
 def _patch_env(monkeypatch, tmp_path):
     # 每个用例独立缓存 DB：否则上一用例写入的缓存会让"后端不可用"场景命中缓存而失真
     monkeypatch.setattr(config.cache, "db_path", str(tmp_path / "cache.db"))
+    # [P1 2026-10-24] 只改 config 不够：get_translation_cache() 是有状态的单例，
+    # 一旦本进程内先被别处初始化过，它就一直用旧的（真实）db 路径。
+    # 后果：本用例的 mock LLM 产出「译文=原文」会被写进真实的 data/translation_cache.db，
+    # 之后真实运行命中该缓存，直接输出原文（实测过：清缓存前全是中文、清后正常出英文）。
+    # 这里连同单例一起重置，保证隔离真正生效。
+    from src.cache import translation_cache as _cache_mod
+    _cache_mod.translation_cache = None
     monkeypatch.setattr(pipeline, "FFMPEG", FFMPEG)
     monkeypatch.setattr(pipeline, "MODEL_DIR", MODEL)
     monkeypatch.setattr(pipeline, "TMP_DIR", str(tmp_path / "tmp"))

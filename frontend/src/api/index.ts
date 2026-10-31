@@ -18,6 +18,7 @@ import type {
   VoicesResponse,
   MediaOutput,
   DubResult,
+  SubtitleStyleForm,
   TranslationSettings,
   PluginInfo,
   PluginListResponse,
@@ -195,15 +196,23 @@ export const submitAlignTask = async (
   return response.data;
 };
 
-/** 五期「我已有字幕文件」：不识别不翻译，直接套上去出片 */
+/**
+ * 「我已有字幕文件」：不识别；targetLang 非 none 时先翻译已有字幕，再出片。
+ *
+ * [P1 2026-10-24] 加 targetLang。后端 _run_compose_task 早就支持翻译已有字幕，
+ * 但路由一直硬编码 target_lang="none"，所以界面只能「直接套用」——想翻译就得
+ * 回头重跑一遍识别。等价于 CLI 的 --translate-only。
+ */
 export const submitComposeTask = async (
-  file: File, subtitle: File, outputVideo: string,
+  file: File, subtitle: File, outputVideo: string, targetLang: string = 'none',
 ): Promise<{ task_id: string; status: string }> => {
   const form = new FormData();
   form.append('file', file);
   form.append('subtitle', subtitle);
   form.append('output_video', outputVideo);
-  const response = await api.post('/compose', form);
+  form.append('target_lang', targetLang);
+  // 翻译要跑 LLM，30s 默认超时不够
+  const response = await api.post('/compose', form, { timeout: 0 });
   return response.data;
 };
 
@@ -222,6 +231,26 @@ export const openInExplorer = async (path: string): Promise<void> => {
 /** 五期：云端翻译服务商预设（含"去哪里拿 Key"的链接） */
 export const getLlmProviders = async (): Promise<{ providers: any[] }> => {
   const response = await api.get('/llm/providers');
+  return response.data;
+};
+
+/**
+ * 批量核验服务商端点是否真实可用。
+ *
+ * 预填的 base_url 只是「猜这个地址应该对」，不等于今天还能用 ——
+ * 地址会变、模型会下线、服务会停服（实测 yi 返回 HTTP 410 已停服）。
+ * 传 api_key 时能额外判断「这个 Key 能不能用」，不传只探端点是否活着。
+ */
+export const probeLlmProviders = async (
+  api_key?: string,
+): Promise<{ results: any[]; summary: any }> => {
+  const response = await api.post('/llm/provider-probe', { api_key: api_key || '' });
+  return response.data;
+};
+
+/** 读取上次核验结果（纯读盘，不重新探测，秒回）。 */
+export const getLlmProviderHealth = async (): Promise<{ results: any[] }> => {
+  const response = await api.get('/llm/provider-health');
   return response.data;
 };
 
@@ -244,6 +273,91 @@ export const cancelTask = async (taskId: string) => {
 /** 五期：删除任务（后端已有 DELETE /api/task/{id}） */
 /** 五期：批量删除——一次请求，服务端循环；id 在 body 里，不受路径编码影响 */
 /** 五期：批量彻底移除（回收站用），一次请求，body 传 ids */
+// 五期 P2：专有名词词表（按名字复用）
+// 五期：可选增强识别模型（turbo）
+/**
+ * 字幕质量开关（幻觉丢弃 / 单行最长显示时长）。
+ *
+ * [P2 2026-10-24] 只读：这两个值在 pipeline 导入时就进了模块常量，
+ * 运行时改不了。界面上要明确告诉用户「改 .env 后重启生效」。
+ */
+export const getSubtitleQuality = async (): Promise<{
+  drop_hallucination: boolean;
+  hallucination_nsp: number;
+  hallucination_cr: number;
+  max_subtitle_sec: number;
+  /** [2026-10-25] 最短显示时长护栏（秒，0=关闭） */
+  min_display_sec: number;
+  asr_device: string;
+  need_restart_to_apply: boolean;
+}> => (await api.get('/system/subtitle-quality')).data;
+
+/** [2026-10-25] ASR 引擎与 sherpa 模型就绪状态（只读）。 */
+export const getAsrEngine = async (): Promise<{
+  engine: string;
+  denoise: boolean;
+  sensevoice_itn: boolean;
+  sensevoice_language: string;
+  vad_threshold: number;
+  vad_min_silence_ms: number;
+  vad_min_speech_ms: number;
+  need_restart_to_apply: boolean;
+  sherpa_installed: boolean;
+  models: {
+    sensevoice: boolean;
+    paraformer: boolean;
+    /** Qwen3-ASR：多语言（日/粤/中英混说），936MB，速度慢 */
+    qwen3: boolean;
+    /** FireRed-ASR：中英 + 方言，739MB */
+    firered: boolean;
+    vad: boolean;
+    denoise: boolean;
+  };
+  models_dir: string;
+  models_error?: string;
+  /** 说话人分离状态（2026-10-25 新增） */
+  diarize?: boolean;
+  diarize_speakers?: number;
+  diarize_threshold?: number;
+  diarize_models?: { segmentation: boolean; embedding: boolean };
+  diarize_dir?: string;
+  diarize_error?: string;
+}> => (await api.get('/system/asr-engine')).data;
+
+/**
+ * 取音频波形峰值（校对台画图用）。
+ *
+ * 后端只返回按像素桶归并的 min/max，不返回原始采样。
+ * 1000 桶约 2000 个数字，足够画满一屏。
+ */
+export const getWaveform = async (params: {
+  path: string;
+  buckets?: number;
+  start?: number;
+  end?: number;
+}): Promise<{
+  buckets: number;
+  duration: number;
+  peaks: [number, number][];
+  sample_rate: number;
+  silence_ratio: number;
+}> => (await api.get('/video/waveform', { params, timeout: 120000 })).data;
+
+export const getAsrModelStatus = async (): Promise<any> =>
+  (await api.get('/asr/model/status')).data;
+
+export const downloadAsrModel = async (): Promise<any> =>
+  (await api.post('/asr/model/download')).data;
+
+export const cancelAsrModel = async (): Promise<any> =>
+  (await api.post('/asr/model/cancel')).data;
+
+export const listGlossary = async (): Promise<{ series: any[] }> =>
+  (await api.get('/glossary')).data;
+
+export const saveGlossarySeries = async (name: string, terms: any[]): Promise<any> =>
+  (await api.post('/glossary', { name, terms })).data;
+
 export const purgeTasks = async (ids: string[]): Promise<{ ok: number; failed: { task_id: string; error: string }[] }> => {
   const r = await api.post('/tasks/purge', { ids });
   return (r.data || { ok: 0, failed: [] }) as { ok: number; failed: { task_id: string; error: string }[] };
@@ -395,7 +509,13 @@ export const burnHardsub = async (payload: {
   subtitle_path: string;
   crf?: number;
   preset?: string;
+  font_name?: string;
   font_size?: number;
+  /**
+   * 完整字幕样式（颜色/描边/阴影/位置/背景框）。
+   * 不传时后端沿用 font_name + font_size 的旧行为，观感零变化。
+   */
+  style?: SubtitleStyleForm;
 }): Promise<MediaOutput> => {
   const response = await api.post('/video/burn', payload, { timeout: 0 });
   return response.data as MediaOutput;
@@ -404,9 +524,20 @@ export const burnHardsub = async (payload: {
 export const muxSoftsub = async (payload: {
   video_path: string;
   tracks: { path: string; language?: string; title?: string }[];
-}): Promise<MediaOutput> => {
+  /** [2026-10-25] 要内嵌进 MKV 的字体族名（仅 MKV 生效），不传则行为不变 */
+  embed_fonts?: string[];
+}): Promise<MediaOutput & { fonts_embedded?: number; fonts_missing?: string[] }> => {
   const response = await api.post('/video/mux', payload, { timeout: 0 });
-  return response.data as MediaOutput;
+  return response.data as MediaOutput & { fonts_embedded?: number; fonts_missing?: string[] };
+};
+
+/** 可内嵌的字体族列表（只列出能真正找到文件的） */
+export const getEmbeddableFonts = async (): Promise<{
+  available: { family: string; path: string; size: number }[];
+  font_dirs: string[];
+}> => {
+  const response = await api.get('/system/fonts');
+  return response.data;
 };
 
 export const dubSubtitles = async (payload: {

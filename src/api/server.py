@@ -40,7 +40,7 @@ import uuid
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException,
                      UploadFile)
@@ -102,11 +102,19 @@ class TranscodeRequest(BaseModel):
     mode: str = "asr"  # asr 或 hardsub
     source_lang: Optional[str] = None  # 如果为None，使用pipeline默认值
     target_lang: str = "en"
-    output_format: str = "srt"  # srt/vtt/ass/json
+    output_format: str = "srt"  # srt/vtt/ass/json/lrc/txt
     terms_file: Optional[str] = None  # 术语库文件路径
     priority: str = "medium"  # high/medium/low
     output_video: str = "soft"  # 五期：完成后成品视频 soft(软字幕MKV)/hard(硬字幕MP4)/both/none
+    # [2026-10-25] 逐任务 ASR 引擎，见 TranscodeRequest 注释
+    asr_engine: Optional[str] = None
     defer_render: bool = False
+    # 五期 P2：专有名词词表 [{"src": "橘长", "type": "person"}]，用于 ASR 后同音纠正
+    glossary: Optional[list] = None
+    # [2026-10-25] 逐任务指定 ASR 引擎：whisper/sensevoice/paraformer/qwen3/firered。
+    # 不传则用全局配置。不同素材适合不同引擎（中文游戏解说 SenseVoice 快 5 倍，
+    # 粤语/英语说唱 Qwen3 明显更准），批量处理混合素材时必须能逐条指定。
+    asr_engine: Optional[str] = None
 
 
 class BatchTranscodeItem(BaseModel):
@@ -115,11 +123,14 @@ class BatchTranscodeItem(BaseModel):
     mode: str = "asr"
     source_lang: Optional[str] = None
     target_lang: str = "en"
-    output_format: str = "srt"
+    output_format: str = "srt"  # srt/vtt/ass/json/lrc/txt
     terms_file: Optional[str] = None
     priority: str = "medium"
     output_video: str = "soft"
     defer_render: bool = False
+    # [2026-10-25] 逐任务 ASR 引擎（批量处理混合素材时每条可不同）。
+    # 不传则用全局配置。
+    asr_engine: Optional[str] = None
 
 
 class BatchTranscodeRequest(BaseModel):
@@ -172,6 +183,7 @@ class TaskStatusResponse(BaseModel):
     updated_at: str
     completed_at: Optional[str]
     error_message: Optional[str]
+    context: dict = {}          # 五期：翻译前语境摘要（确认页可见）
 
 
 class BurnRequest(BaseModel):
@@ -183,6 +195,15 @@ class BurnRequest(BaseModel):
     preset: str = "medium"
     font_name: Optional[str] = None
     font_size: Optional[int] = Field(default=None, ge=8, le=200)
+    # [2026-10-25] 完整样式：颜色/描边/阴影/位置/背景框。
+    # 不传时沿用 font_name + font_size 的旧行为，已有调用零改动。
+    style: Optional[dict] = None
+    # [2026-10-25] 字形回退：主字体缺字时（如 Arial 缺中文）自动切字体，
+    # 避免 libass 画方框。默认开启 —— 不开的话用户只看到「几个方块」，
+    # 却完全不知道原因。
+    glyph_fallback: bool = True
+    # 回退字体候选（按优先级）。不传时用内置常用中文字体表。
+    fallback_fonts: Optional[list[str]] = None
 
 
 class MuxTrack(BaseModel):
@@ -197,6 +218,9 @@ class MuxRequest(BaseModel):
     video_path: str
     tracks: list[MuxTrack] = Field(..., min_length=1)
     output_name: Optional[str] = None
+    # [2026-10-25] 字体内嵌：按字体族名嵌入对应系统字体（仅 MKV 生效）。
+    # 传空/不传时行为与改动前完全一致。
+    embed_fonts: list[str] = Field(default_factory=list)
 
 
 class DubSegment(BaseModel):
@@ -564,14 +588,67 @@ progress_callback_task_id: str = ""
 # --------------------------------------------------------------------------- #
 
 async def _run_compose_task(task_id: str, video_path: str, subtitle_file: Optional[str],
-                            output_video: str) -> None:
-    """五期「我已有字幕文件」：不识别、不翻译，直接把字幕套进视频出片。"""
+                            output_video: str, target_lang: Optional[str] = None,
+                            should_cancel: Optional[Callable] = None) -> None:
+    """五期「我已有字幕文件」：不识别；给了目标语言就先翻译，再套进视频出片。
+
+    [P0 2026-10-24] 补掉一个空缺：原来「我已有字幕文件」只能**直接套用**，
+    想翻译必须回头重跑识别（白等一遍 ASR）。而 CLI 已支持 `--translate-only`，
+    这里让同一能力对界面可用：跳过识别 → 只翻译已有字幕 → 再出片。
+    对本地隐私流程尤其关键：可用 GPU 先识别好字幕，之后再起本地 LLM 只做翻译。
+    """
     if not subtitle_file or not os.path.isfile(subtitle_file):
         await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
                                        error_message="没有找到字幕文件")
         return
+    # 需要翻译时：跳过识别，只把已有字幕翻成目标语言，再用译文出片
+    burn_srt = subtitle_file
+    from src.pipeline import is_no_translate as _is_nt
+    if target_lang and not _is_nt(target_lang):
+        from src.pipeline import run_pipeline as _run_pipeline
+        import functools
+        await task_manager.update_task(task_id=task_id, progress=0.15,
+                                       message="正在翻译已有字幕（跳过识别）…")
+        loop = asyncio.get_running_loop()
+        # 进度映射：翻译阶段占 15%~85%，否则长视频会一直卡在 0.15 看着像死掉
+        def _mk_progress_cb():
+            def _cb(p: float, msg: str) -> None:
+                try:
+                    scaled = 0.15 + max(0.0, min(1.0, float(p))) * 0.70
+                    coro = pipeline_progress_callback(scaled, msg, task_id)
+                    asyncio.run_coroutine_threadsafe(coro, loop)
+                except Exception:  # noqa: BLE001
+                    pass
+            return _cb
+
+        try:
+            outs = await loop.run_in_executor(None, functools.partial(
+                _run_pipeline, video=video_path, target_lang=target_lang,
+                output_format="srt", from_srt=subtitle_file,
+                progress_callback=_mk_progress_cb(), should_cancel=should_cancel))
+        except Exception as _e:  # noqa: BLE001
+            if should_cancel is not None and should_cancel():
+                # 用户主动取消属正常控制流，不能报成「翻译失败」
+                await task_manager.update_task(task_id=task_id, status="cancelled",
+                                               progress=1.0, error_message="cancelled by user")
+                REGISTRY.inc("subai_task_cancelled_total")
+                return
+            await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
+                                           error_message="翻译已有字幕失败：%s" % _e)
+            return
+        _bi = [p for p in (outs or []) if p.endswith(".bilingual.srt")]
+        _tg = [p for p in (outs or []) if p.endswith(".%s.srt" % target_lang)]
+        if _bi:
+            burn_srt = _bi[0]        # 优先双语：原文+译文都能对上口型
+        elif _tg:
+            burn_srt = _tg[0]
+        else:
+            await task_manager.update_task(task_id=task_id, status="failed", progress=1.0,
+                                           error_message="翻译完成但没有产出字幕文件")
+            return
+
     await task_manager.update_task(task_id=task_id, progress=0.3, message="正在生成成品视频…")
-    produced = await _produce_video(task_id, video_path, [subtitle_file], "none", output_video)
+    produced = await _produce_video(task_id, video_path, [burn_srt], target_lang or "none", output_video)
     if not produced:
         await task_manager.update_task(
             task_id=task_id, status="failed", progress=1.0,
@@ -579,7 +656,7 @@ async def _run_compose_task(task_id: str, video_path: str, subtitle_file: Option
         return
     await task_manager.update_task(
         task_id=task_id, status="completed", progress=1.0,
-        result_files=[subtitle_file] + produced,
+        result_files=[burn_srt] + produced,
         message="完成，成品已生成：%s" % os.path.basename(produced[-1]),
         metrics={"lines_total": 0, "lines_failed": 0, "terms_hit": 0, "cache_hits": 0,
                  "llm_requests": 0, "files": len(produced)},
@@ -763,8 +840,10 @@ async def process_transcode_task(
     terms_file: Optional[str] = None,
     output_video: str = "soft",
     defer_render: bool = False,
+    glossary: Optional[list] = None,
     script_file: Optional[str] = None,
     subtitle_file: Optional[str] = None,
+    asr_engine: Optional[str] = None,
 ) -> None:
     """
     处理转码任务（核心逻辑）
@@ -788,7 +867,16 @@ async def process_transcode_task(
     
     # 五期：我已有字幕文件 —— 不识别不翻译，直接套上去出片
     if str(mode).lower() == "compose":
-        await _run_compose_task(task_id, video_path, subtitle_file, output_video)
+        # [P0 2026-10-24] 这里原先在 register_cancel_token 之前就 return，
+        # 导致「我已有字幕文件」任务**根本无法取消**（DELETE 置不了位），翻译长视频时只能干等。
+        # 现在补上令牌的注册/注销，并把 is_set 作为取消信号传进翻译阶段。
+        progress_callback_task_id = task_id
+        _compose_token = register_cancel_token(task_id)
+        try:
+            await _run_compose_task(task_id, video_path, subtitle_file, output_video,
+                                    target_lang, should_cancel=_compose_token.is_set)
+        finally:
+            unregister_cancel_token(task_id)
         return
 
     # 五期：我有文字稿 —— 只识别时间轴，文字用用户的稿子
@@ -842,19 +930,39 @@ async def process_transcode_task(
         # 收集翻译统计（术语命中 / 缓存命中 / 失败行数），用于区分完全成功、部分失败、翻译全失败
         stats: dict = {}
 
-        # 在线程池中执行同步的run_pipeline函数
+        # [2026-10-25] pipeline 改在**独立子进程**里跑（src/worker.run_isolated）。
+        #
+        # 动机：本项目重度依赖 CTranslate2 / sherpa-onnx / onnxruntime 三套原生库。
+        # 它们的崩溃（段错误、CUDA 驱动不兼容、内存越界）**不走 Python 异常**，
+        # try/except 拦不住 —— 原来在线程池里跑，一个视频让 CTranslate2 崩了，
+        # 整个 subai-backend.exe 就消失，同时运行的其它任务全部丢失，
+        # 桌面端直接显示「后端离线」。
+        #
+        # 隔离后同一崩溃只是「这个任务失败」，服务继续活着；
+        # 附带好处：卡死在 C++ 里的任务能被 terminate 真正停掉。
+        #
+        # 注：run_pipeline 仍保留在 pipeline.py 里，命令行和测试照旧可直接调用，
+        # 只有服务端这条路径走隔离。
+        from src.worker import run_isolated
+
+        _payload = {
+            "video": video_path,
+            "mode": mode,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "glossary": glossary,
+            "terms_file": terms_file,
+            "output_format": output_format,
+            # [2026-10-25] 逐任务指定 ASR 引擎（None=用全局配置）
+            "asr_engine": asr_engine,
+        }
         result = await main_loop.run_in_executor(
-            None,  # 使用默认线程池
-            lambda: run_pipeline(
-                video=video_path,
-                mode=mode,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                terms_file=terms_file,
-                output_format=output_format,
+            None,  # 线程池：只是等子进程，不占 CPU
+            lambda: run_isolated(
+                _payload,
                 progress_callback=_thread_safe_progress_cb,
-                stats=stats,
                 should_cancel=cancel_token.is_set,
+                stats_out=stats,
             )
         )
 
@@ -863,6 +971,14 @@ async def process_transcode_task(
         total = int(stats.get("total", 0) or 0)
         terms = int(stats.get("terms", 0) or 0)
         cache_hits = int(stats.get("cache_hits", 0) or 0)
+
+        # 五期：把语境摘要写进任务记录（确认页可见；摘要错误时能定位到底污染了什么）
+        _video_ctx = stats.get("context") or {}
+        if _video_ctx:
+            try:
+                await task_manager.update_task(task_id=task_id, context=_video_ctx)
+            except Exception as _e:  # noqa: BLE001
+                logger.warning("写入语境摘要失败（不影响任务）: %r", _e)
 
         # 四期 4.6：把统计写进任务记录，供数据分析（这些数字此前只出现在日志里）
         metrics = {
@@ -873,6 +989,16 @@ async def process_transcode_task(
             "llm_requests": int(stats.get("llm_requests", 0) or 0),
             "files": len(files),
         }
+        # [2026-10-25] 语音覆盖率 / 未覆盖区间（漏句提示）。
+        # 这段数据此前只写进日志，用户看不到；现在随 metrics 进任务记录，
+        # 前端可在任务卡片上提示「未覆盖 X 秒，N 处空洞」并可跳转到对应时间点。
+        _cov = stats.get("coverage") or {}
+        if _cov:
+            metrics["coverage"] = _cov
+        # 说话人分离统计 [2026-10-25]：仅在开启分离且成功时存在
+        _dstat = stats.get("diarization") or {}
+        if _dstat:
+            metrics["diarization"] = _dstat
 
         produce_ok = False
 
@@ -933,8 +1059,15 @@ async def process_transcode_task(
             produce_ok = True
             REGISTRY.inc("subai_task_completed_total")
 
+        # 五期：两段式——defer_render 时只出字幕草稿，等用户在确认页核对后调 /render 再出片
+        if produce_ok and defer_render:
+            await task_manager.update_task(
+                task_id=task_id,
+                message=("字幕草稿已就绪（%d 行）——核对后点「生成视频」再出片" % total)
+                        + (("（其中 %d 行翻译失败，已保留原文）" % failed) if failed else ""),
+            )
         # 五期：翻译完成后自动出片（软字幕/硬字幕/两者）；失败只告警，绝不影响任务状态
-        if produce_ok:
+        elif produce_ok:
             produced = await _produce_video(task_id, video_path, files, target_lang, output_video)
             if produced:
                 files = list(files) + produced
@@ -1007,6 +1140,61 @@ async def render_task_video(task_id: str, current_user: UserRecord = Depends(get
     return {"task_id": task_id, "files": produced}
 
 
+class GlossarySaveRequest(BaseModel):
+    """保存一份专有名词词表（按名字复用）。"""
+    name: str = Field(..., min_length=1, max_length=64, description="词表名，如「橘长的三角洲」")
+    terms: list = Field(default_factory=list, description='[{"src":"橘长","type":"person"}]')
+
+
+@app.get("/api/asr/model/status")
+async def asr_model_status(current_user: UserRecord = Depends(get_current_user)):
+    """可选增强识别模型（turbo）的下载状态 / 是否已安装。"""
+    from src.asr_model import DL
+    return DL.status()
+
+
+@app.post("/api/asr/model/download")
+async def asr_model_download(current_user: UserRecord = Depends(get_current_user)):
+    """开始后台下载 turbo 模型（断点续传、可取消）。"""
+    from src.asr_model import DL, start
+    if DL.state == "running":
+        raise HTTPException(status_code=409, detail="正在下载中")
+    return start()
+
+
+@app.post("/api/asr/model/cancel")
+async def asr_model_cancel(current_user: UserRecord = Depends(get_current_user)):
+    from src.asr_model import cancel
+    return cancel()
+
+
+@app.get("/api/glossary")
+async def list_glossary(current_user: UserRecord = Depends(get_current_user)):
+    """列出已保存的专有名词词表（供「选择已有」下拉）。"""
+    from src.db.glossary import GlossaryStore
+    return {"series": await GlossaryStore().list_all()}
+
+
+@app.post("/api/glossary")
+async def save_glossary(request: GlossarySaveRequest,
+                        current_user: UserRecord = Depends(get_current_user)):
+    """新增或按名字覆盖一份词表。"""
+    from src.db.glossary import GlossaryStore
+    try:
+        saved = await GlossaryStore().upsert(request.name, request.terms)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return saved
+
+
+@app.delete("/api/glossary/{gid}")
+async def delete_glossary(gid: int, current_user: UserRecord = Depends(get_current_user)):
+    from src.db.glossary import GlossaryStore
+    if not await GlossaryStore().delete(gid):
+        raise HTTPException(status_code=404, detail="词表不存在")
+    return {"id": gid, "deleted": True}
+
+
 @app.get("/api/term-packs")
 async def list_term_packs(current_user: UserRecord = Depends(get_current_user)):
     """五期：常见术语包（ASR 错字纠正 + 翻译术语）。"""
@@ -1039,6 +1227,77 @@ async def health_check():
 async def asr_device_info(current_user: UserRecord = Depends(get_current_user)):
     """ASR 设备明细（配置值 / 实际生效值 / CUDA 支持 / 空闲显存 / DLL 目录）。"""
     return config.describe_asr_device()
+
+
+@app.get("/api/system/subtitle-quality")
+async def subtitle_quality(current_user: UserRecord = Depends(get_current_user)):
+    """字幕质量相关的两个开关当前值（只读，供设置页展示）。
+
+    [P2 2026-10-24] 这两项是在 pipeline 模块导入时读进模块常量的，
+    运行时改配置不会影响已加载的进程 —— 所以这里**只读不写**：
+    写一个「保存了但没生效」的接口反而更误导。界面上明确提示改完要重启。
+    """
+    from src import pipeline as _pl
+    return {
+        "drop_hallucination": bool(getattr(config.asr, "drop_hallucination", False)),
+        "hallucination_nsp": float(getattr(config.asr, "hallucination_nsp", 0.6)),
+        "hallucination_cr": float(getattr(config.asr, "hallucination_cr", 2.4)),
+        "max_subtitle_sec": float(getattr(_pl, "MAX_DISPLAY_SEC", 8.0)),
+        # [2026-10-25] 最短显示时长护栏（太短的行会延长，但不越过下一行起点）
+        "min_display_sec": float(getattr(config, "min_display_sec", 1.0) or 0),
+        "asr_device": str(getattr(config.asr, "device", "auto")),
+        "need_restart_to_apply": True,
+    }
+
+
+@app.get("/api/system/asr-engine")
+async def asr_engine(current_user: UserRecord = Depends(get_current_user)):
+    """当前 ASR 引擎与 sherpa 模型就绪状态（只读，供设置页展示）。
+
+    [2026-10-25] 引擎切换走 SUBAI_ASR_ENGINE 环境变量（进程启动时读取），
+    与 asr_device 同类处理：**只读不写**，避免出现「保存了但没生效」的错觉。
+    """
+    info = {
+        "engine": str(getattr(config.asr, "engine", "whisper")),
+        "denoise": bool(getattr(config.asr, "denoise", False)),
+        "sensevoice_itn": bool(getattr(config.asr, "sensevoice_itn", True)),
+        "sensevoice_language": str(getattr(config.asr, "sensevoice_language", "auto")),
+        "vad_threshold": float(getattr(config.asr, "vad_threshold", 0.5)),
+        "vad_min_silence_ms": int(getattr(config.asr, "vad_min_silence_ms", 100)),
+        "vad_min_speech_ms": int(getattr(config.asr, "vad_min_speech_ms", 250)),
+        "need_restart_to_apply": True,
+        "sherpa_installed": False,
+        "models": {"sensevoice": False, "paraformer": False,
+                   "qwen3": False, "firered": False, "vad": False, "denoise": False},
+        "models_dir": "",
+    }
+    try:
+        import importlib.util as _ilu
+        info["sherpa_installed"] = _ilu.find_spec("sherpa_onnx") is not None
+    except Exception:  # noqa: BLE001
+        info["sherpa_installed"] = False
+    try:
+        from src.asr_sherpa import models_available, ENGINE_DIR
+        info["models"] = models_available()
+        info["models_dir"] = ENGINE_DIR
+    except Exception as _e:  # noqa: BLE001
+        info["models_error"] = repr(_e)
+    # 说话人分离状态 [2026-10-25]
+    info["diarize"] = bool(getattr(config.asr, "diarize", False))
+    info["diarize_speakers"] = int(getattr(config.asr, "diarize_speakers", -1) or -1)
+    info["diarize_threshold"] = float(getattr(config.asr, "diarize_threshold", 0.9) or 0.9)
+    info["diarize_models"] = {"segmentation": False, "embedding": False}
+    try:
+        from src import diarize as _dz
+        _dm = _dz.models_available()
+        info["diarize_models"] = {
+            "segmentation": _dm["segmentation"],
+            "embedding": _dm["embedding"],
+        }
+        info["diarize_dir"] = _dm["dir"]
+    except Exception as _e:  # noqa: BLE001
+        info["diarize_error"] = repr(_e)
+    return info
 
 
 @app.get("/api/metrics")
@@ -1139,9 +1398,16 @@ async def compose_from_subtitle(
     file: UploadFile = File(..., description="视频文件"),
     subtitle: UploadFile = File(..., description="字幕文件 srt/vtt/ass"),
     output_video: str = Form("soft", description="成品 soft|hard|both"),
+    target_lang: str = Form("none", description="翻译目标语言；none=不翻译，直接套用"),
     current_user: UserRecord = Depends(get_current_user),
 ):
-    """五期「我已有字幕文件」：不识别不翻译，直接套进视频出片。"""
+    """五期「我已有字幕文件」：不识别；给了目标语言就先翻译，再套进视频出片。
+
+    [P1 2026-10-24] 补上 target_lang：`_run_compose_task` 早就支持翻译已有字幕，
+    但这条路由一直硬编码 target_lang="none"，于是界面只能「直接套用」——
+    想翻译必须回头重跑识别（白等一遍 ASR）。CLI 的 --translate-only 就是这么用的，
+    现在界面对齐。对本地隐私流程尤其关键：可先用 GPU 识别好字幕，之后再起本地 LLM 只翻译。
+    """
     sub_name = subtitle.filename or ""
     sub_ext = Path(sub_name).suffix.lower()
     if sub_ext not in {".srt", ".vtt", ".ass", ".ssa"}:
@@ -1180,8 +1446,9 @@ async def compose_from_subtitle(
         await file.close()
         await subtitle.close()
 
+    _lang = (target_lang or "none").strip() or "none"
     item = SimpleNamespace(
-        video_path=dest, mode="compose", source_lang=None, target_lang="none",
+        video_path=dest, mode="compose", source_lang=None, target_lang=_lang,
         output_format="srt", terms_file=None, priority="medium",
         output_video=output_video, script_file=None, subtitle_file=sub_dest,
     )
@@ -1338,6 +1605,11 @@ async def _submit_one_transcode(item, current_user: UserRecord) -> dict:
     if not os.path.exists(item.video_path):
         return {"video_path": item.video_path, "error": f"视频文件不存在: {item.video_path}"}
 
+    # [2026-10-25] 校验逐任务 ASR 引擎。放在提交前，
+    # 让「引擎名写错」立刻返回 400 明确指出可选值，
+    # 而不是等任务跑起来在子进程深处失败。
+    _engine = normalize_asr_engine(getattr(item, "asr_engine", None))
+
     # 生成任务ID
     task_id = str(uuid.uuid4())[:8]
     video_filename = get_video_filename(item.video_path)
@@ -1368,8 +1640,10 @@ async def _submit_one_transcode(item, current_user: UserRecord) -> dict:
         terms_file=item.terms_file,
         output_video=getattr(item, "output_video", "soft"),
         defer_render=getattr(item, "defer_render", False),
+        glossary=getattr(item, "glossary", None),
         script_file=getattr(item, "script_file", None),
         subtitle_file=getattr(item, "subtitle_file", None),
+        asr_engine=_engine,
     )
 
     if not success:
@@ -2027,6 +2301,138 @@ async def backup_restore(backup_id: str, current_user: UserRecord = Depends(get_
 # 视频合成（四期 4.2）
 # --------------------------------------------------------------------------- #
 
+@app.get("/api/video/waveform")
+async def video_waveform(
+    path: str,
+    buckets: int = 1000,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
+    current_user: UserRecord = Depends(get_current_user),
+):
+    """返回音频波形峰值，供校对台画波形图。
+
+    [2026-10-25] 校对台此前只有播放器和字幕列表，用户看不出「这行字幕切在
+    哪段声音上」。波形图能把两者对齐：切早了/切晚了、有声音却没字幕，一眼可见。
+
+    只返回按像素桶归并的 min/max（1000 桶 = 2000 个数），
+    不返回原始采样 —— 10 分钟音频有 2600 万采样点，传前端必然卡死。
+    """
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+    # 桶数上限保护：超过 4000 对画布没有意义，只会变慢
+    b = max(50, min(4000, int(buckets or 1000)))
+    try:
+        from src.waveform import extract_peaks, silence_ratio
+        data = extract_peaks(path, buckets=b, start=start, end=end)
+        data["silence_ratio"] = silence_ratio(data.get("peaks") or [])
+        return data
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"波形提取失败: {e}")
+
+
+def _build_style(raw: Optional[dict]):
+    """把 API 传来的样式 dict 转成 SubtitleStyle；为空返回 None。
+
+    返回 None 表示「用旧路径」（只有 font_name/font_size），
+    这样老客户端不传 style 时行为完全不变。
+    样式字段脏数据由 SubtitleStyle.from_dict 内部回落默认值，这里不抛异常 ——
+    样式字段写错不该让整个烧录任务失败。
+    """
+    if not raw:
+        return None
+    try:
+        from src.subtitle_style import SubtitleStyle
+        return SubtitleStyle.from_dict(raw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+
+
+VALID_ASR_ENGINES = ("whisper", "sensevoice", "paraformer", "qwen3", "firered")
+
+
+def normalize_asr_engine(value) -> Optional[str]:
+    """校验并归一化逐任务的 ASR 引擎名。
+
+    [2026-10-25] 为什么要校验而不是直接透传：
+    引擎名会一路传到子进程，写错的话会在很深的调用栈里抛出
+    「未知引擎」——用户看到的是「烧录失败/任务失败」，完全看不出
+    是自己填错了引擎名。这里提前拦住，报错直指问题。
+    空/None 返回 None，表示「用全局配置」。
+    """
+    if value is None:
+        return None
+    name = str(value).strip().lower()
+    if not name:
+        return None
+    if name not in VALID_ASR_ENGINES:
+        raise HTTPException(
+            status_code=400,
+            detail="未知的 ASR 引擎: %s（可选：%s）"
+                   % (value, " / ".join(VALID_ASR_ENGINES)))
+    return name
+
+
+def prepare_glyph_fallback(request, out_path: str) -> dict:
+    """算出字形回退，必要时生成一个带行内 \\fn 标签的临时 ASS。
+
+    返回 {applied, fallback, missing, error, _tmp_subtitle}。
+    如果字幕本来就是 ASS，直接在原文上注入；否则转成 ASS 再注入。
+
+    为什么一定转 ASS：`force_style` 只能设整行统一的字体，
+    没法表达「这几个字用另一个字体」。行内覆盖只有 ASS 支持。
+    """
+    from src import font_pipeline, subtitle_formats, subtitle_style
+
+    rows = subtitle_formats.read_file(request.subtitle_path)
+    if not rows:
+        return {"applied": False, "fallback": None, "missing": [],
+                "error": None, "_tmp_subtitle": request.subtitle_path}
+
+    texts = [r.get("text", "") for r in rows]
+    # 主字体：优先用请求里指定的，否则用样式里的，再否则给个中文字体兜底
+    style_obj = _build_style(request.style)
+    primary = request.font_name or getattr(style_obj, "font_family", "") or "SimHei"
+    candidates = request.fallback_fonts or ["Microsoft YaHei", "SimHei", "SimSun"]
+
+    # 原始 ASS 文本（用于提取内嵌字体）
+    ass_text = None
+    try:
+        if request.subtitle_path.lower().endswith((".ass", ".ssa")):
+            with open(request.subtitle_path, "r", encoding="utf-8", errors="replace") as f:
+                ass_text = f.read()
+    except OSError:
+        ass_text = None
+
+    info = font_pipeline.prepare(texts, primary, candidates, ass_content=ass_text)
+    info.pop("embedded_fonts", None)
+    info.pop("embedded_names", None)
+    info.pop("reports", None)
+
+    if not info.get("glyph_fallback"):
+        # 不需要回退：原字幕直接用，不额外生成文件
+        return {"applied": False,
+                "fallback": None,
+                "missing": info.get("missing_chars") or [],
+                "error": info.get("error"),
+                "_tmp_subtitle": request.subtitle_path}
+
+    doc = subtitle_style.build_ass_document(
+        rows, style=style_obj, glyph_fallback=info["glyph_fallback"])
+    tmp_path = out_path + ".glyph.ass"
+    with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(doc)
+
+    return {"applied": True,
+            "fallback": info.get("fallback_family"),
+            "missing": info.get("missing_chars") or [],
+            "error": info.get("error"),
+            "_tmp_subtitle": tmp_path}
+
+
 @app.post("/api/video/burn")
 async def video_burn(request: BurnRequest, current_user: UserRecord = Depends(get_current_user)):
     """硬字幕烧录：把字幕烧进画面，输出到 output 目录。"""
@@ -2038,19 +2444,50 @@ async def video_burn(request: BurnRequest, current_user: UserRecord = Depends(ge
     stem = Path(request.video_path).stem
     filename = request.output_name or f"{stem}.hardsub.mp4"
     out_path = os.path.join(ensure_output_dir(), filename)
+
+    # [2026-10-25] 字形回退：先把「主字体缺哪些字」算出来，
+    # 再把缺的字用行内 {\fn回退字体} 包裹。
+    # 这一步必须在烧录**之前**做，因为 force_style 无法表达行内覆盖 ——
+    # 只有 ASS 文件才能带行内标签。
+    glyph_info = {"applied": False, "missing": [], "fallback": None, "error": None}
+    burn_subtitle = request.subtitle_path
     loop = asyncio.get_running_loop()
+    if request.glyph_fallback:
+        try:
+            # 字形解析要读字体文件（几十 MB），必须放线程池，
+            # 否则会阻塞事件循环、把整台后端的响应都拖慢。
+            glyph_info = await loop.run_in_executor(
+                None, lambda: prepare_glyph_fallback(request, out_path))
+            burn_subtitle = glyph_info.get("_tmp_subtitle") or request.subtitle_path
+        except Exception as e:  # noqa: BLE001
+            # 字体处理失败绝不能让烧录失败（见 font_pipeline 模块注释）
+            glyph_info["error"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+
     try:
         await loop.run_in_executor(
             None,
             lambda: burn_hardsub(
-                request.video_path, request.subtitle_path, out_path,
+                request.video_path, burn_subtitle, out_path,
                 crf=request.crf, preset=request.preset,
                 font_name=request.font_name, font_size=request.font_size,
+                style=_build_style(request.style),
             ),
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"硬字幕烧录失败: {e}")
-    return {"output_path": out_path, "filename": filename}
+    finally:
+        # 临时生成的 ASS 用完即删，不留垃圾在 output 目录
+        tmp_sub = glyph_info.get("_tmp_subtitle")
+        if tmp_sub and os.path.isfile(tmp_sub) and tmp_sub != request.subtitle_path:
+            try:
+                os.remove(tmp_sub)
+            except OSError:
+                pass
+    # 内部临时路径不该出现在响应里（用户看到 .glyph.ass 会困惑）
+    public_glyph = {k: v for k, v in glyph_info.items() if not k.startswith("_")}
+    out = {"output_path": out_path, "filename": filename,
+           "glyph_fallback": public_glyph}
+    return out
 
 
 @app.post("/api/video/mux")
@@ -2066,12 +2503,102 @@ async def video_mux(request: MuxRequest, current_user: UserRecord = Depends(get_
     filename = request.output_name or f"{stem}.softsub.mkv"
     out_path = os.path.join(ensure_output_dir(), filename)
     tracks = [t.model_dump() for t in request.tracks]
+
+    # [2026-10-25] 字体内嵌：把字体族名解析成实际文件。
+    # 缺字体**不报错**，只在响应里如实报告 —— 没有内嵌的字幕在本机照样能播，
+    # 因为「对方没装这个字体」直接让整个封装失败是不成比例的惩罚。
+    font_files: list = []
+    font_report: dict = {"resolved": {}, "missing": []}
+    if request.embed_fonts:
+        from src import fonts as fonts_module
+        font_report = fonts_module.collect_fonts(request.embed_fonts)
+        font_files = list(font_report["resolved"].values())
+
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, lambda: mux_softsub(request.video_path, tracks, out_path))
+        await loop.run_in_executor(
+            None, lambda: mux_softsub(request.video_path, tracks, out_path, fonts=font_files))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"软字幕封装失败: {e}")
-    return {"output_path": out_path, "filename": filename}
+    return {
+        "output_path": out_path,
+        "filename": filename,
+        "fonts_embedded": len(font_files),
+        "fonts_missing": font_report["missing"],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Provider 可用性核验（[2026-10-25]）
+#
+# 动机：25 个 provider 只是「预填了 base_url + 模型名」，预填不等于可用。
+# 实测发现 yi 的接口已返回 410 model_service_closed，而我们仍在列表里推荐它。
+# 没有核验，「数量多」就是纸面优势。
+# --------------------------------------------------------------------------- #
+
+class ProviderProbeRequest(BaseModel):
+    """批量核验请求。ids 为空表示全部；api_key 用于验证认证是否通过。"""
+    ids: Optional[list[str]] = None
+    api_key: str = ""
+    workers: int = Field(default=4, ge=1, le=8)
+
+
+@app.post("/api/llm/provider-probe")
+async def llm_provider_probe(request: ProviderProbeRequest,
+                             current_user: UserRecord = Depends(get_current_admin)):
+    """对 provider 发真实请求做核验，结果落盘并返回。
+
+    默认逐个探活（无 key 也能判断端点是否存在），
+    传了 api_key 才能判断「这个 key 到底能不能用」。
+    耗时较长，故意用 POST + 较长超时，避免被当成轮询接口。
+    """
+    from src import provider_health as ph
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            lambda: ph.probe_many(request.ids, api_key=request.api_key,
+                                  workers=request.workers),
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"核验失败: {e}")
+
+
+@app.get("/api/llm/provider-health")
+async def llm_provider_health(current_user: UserRecord = Depends(get_current_user)):
+    """读取已保存的各 provider 健康记录（不重新探测，纯读磁盘）。"""
+    from src import provider_health as ph
+    records = ph.load_health()
+    for pid, rec in records.items():
+        if isinstance(rec, dict):
+            age = time.time() - float(rec.get("checked_at") or 0)
+            rec["age_sec"] = age
+            rec["stale"] = age > ph.HEALTH_TTL_SEC
+    return {"records": records, "ttl_sec": ph.HEALTH_TTL_SEC}
+
+
+@app.get("/api/system/fonts")
+async def system_fonts(current_user: UserRecord = Depends(get_current_user)):
+    """列出可用于内嵌的字体族（供前端下拉选择）。
+
+    [2026-10-25] 只返回「能被 resolve_font_file 找到」的族名，
+    不返回所有系统字体：列出来的每一个都能真正嵌进去，
+    避免用户选了个名字却嵌不进去。
+    """
+    from src import fonts as fonts_module
+
+    common = ["Microsoft YaHei", "SimHei", "SimSun", "KaiTi", "FangSong",
+              "Arial", "Times New Roman"]
+    found = []
+    for fam in common:
+        try:
+            p = fonts_module.resolve_font_file(fam)
+        except Exception:  # noqa: BLE001
+            p = None
+        if p:
+            found.append({"family": fam, "path": p,
+                          "size": os.path.getsize(p)})
+    return {"available": found, "font_dirs": fonts_module.font_dirs()}
 
 
 # --------------------------------------------------------------------------- #

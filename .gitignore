@@ -67,4 +67,26 @@ data/plugins.json
 
 # 更新产物（构建物，随 Release 分发而非入库）
 *.nsis.zip
+
+# ===== 语料与自动发现产物（2026-10-25）=====
+# corpus/ 是本地积累的参考字幕（用户视频转录结果），属于私人素材，不入库。
+# data/known_terms.json 由术语自动发现生成，随语料变化，不入库。
+corpus/
+data/known_terms.json
+
+# sherpa 模型（446 MB，按需下载或从发布包获取）
+models/sherpa/
 *.nsis.zip.sig
+
+# 运行期产物：数据库、缓存、探测结果、临时音频，都不入库
+data/*.db
+data/*.json
+data/*.wav
+data/*.mp4
+data/*.png
+data/*.txt
+# 例外：需要随仓库分发的配置/词表模板
+!data/sample_terms.json
+
+# 本地访问令牌：首次启动自动生成，每台机器不同，绝不入库
+local_token.txt

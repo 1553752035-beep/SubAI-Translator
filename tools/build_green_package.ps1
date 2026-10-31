@@ -72,6 +72,39 @@ if (Test-Path -LiteralPath $FfmpegDir) {
 robocopy $ModelsDir (Join-Path $OutDir 'models') /E /NFL /NDL /NJH /NJS /NP | Out-Null
 Write-Host "  models\   <- $ModelsDir"
 
+# --------------------------------------------------------------------------- #
+# 分发安全闸门（[P0 2026-10-24]）
+# 发现含机密的 .env 直接中止构建 —— 不是提示。历史教训：安装根目录的 .env
+# 里躺着明文的云端 API Key，只要有人"把整个文件夹拷给别人"就会泄。
+# 机密应放在用户级 %APPDATA%\SubAI\.env（读取优先级更高，不在分发目录内）。
+# --------------------------------------------------------------------------- #
+$secretPattern = 'SUBAI_[A-Z0-9_]*(API_KEY|API_KEYS|JWT_SECRET|PASSWORD)\s*=\s*\S+'
+$envCandidates = @(
+    (Join-Path $installRoot '.env'),
+    (Join-Path $RepoRoot '.env'),
+    (Join-Path $OutDir '.env')
+)
+foreach ($envFile in $envCandidates) {
+    if (-not (Test-Path -LiteralPath $envFile)) { continue }
+    $hits = @(Select-String -LiteralPath $envFile -Pattern $secretPattern -ErrorAction SilentlyContinue)
+    if ($hits.Count -gt 0) {
+        Write-Host ''
+        Write-Host '分发安全闸门：发现含机密的 .env，已中止构建'
+        Write-Host ("  文件: " + $envFile)
+        foreach ($h in $hits) {
+            $masked = $h.Line -replace '(=\s*).*', '$1***'
+            Write-Host ("  第 " + $h.LineNumber + " 行: " + $masked)
+        }
+        Write-Host ''
+        Write-Host '处理方式：把机密移到用户级目录（程序读取优先级更高，且不会被分发带走）：'
+        Write-Host '  New-Item -ItemType Directory -Force -Path "$env:APPDATA\SubAI" | Out-Null'
+        Write-Host ('  Move-Item -LiteralPath "' + $envFile + '" -Destination "$env:APPDATA\SubAI\.env" -Force')
+        Write-Host '然后重新执行本脚本。'
+        exit 3
+    }
+}
+Write-Host '分发安全闸门: 通过（未发现含机密的 .env）'
+
 $readme = @()
 $readme += "SubAI Translator 绿色版"
 $readme += ""
@@ -80,6 +113,7 @@ $readme += "2) 首次使用前可先自检：  subai-backend.exe --check"
 $readme += "3) 翻译需要本地或云端翻译服务（默认 http://127.0.0.1:5001/v1/chat/completions），"
 $readme += "   也可在 设置 页切换为云端模式"
 $readme += "4) 需要 GPU 加速语音识别时，见 README 的「GPU 加速（可选）」"
+$readme += "5) 本目录不含 .env：云端 API Key 等机密请放在 %APPDATA%\SubAI\.env（设置页保存时会自动写到这里）"
 $readme += ""
 $readme += "全部路径均由本目录推导，可整体拷贝到其他机器使用。"
 @($readme) | Set-Content -Path (Join-Path $OutDir '使用说明.txt') -Encoding UTF8

@@ -15,11 +15,41 @@ class TestProviders:
         assert {"国内", "国际", "聚合", "本地"} <= groups
 
     def test_every_provider_is_usable(self):
+        """每个 provider 都必须「可配置」。
+
+        [2026-10-25] 契约变了：翻译专用引擎（DeepL / Google）不是
+        OpenAI 兼容协议，**没有 base_url 也没有模型名** —— 它们只需要 Key。
+        原来的断言要求所有 provider 都有 base_url，等于强迫把 DeepL
+        填成一个假的 OpenAI 端点，用户照着填必然 404。
+
+        正确的契约是按协议区分：
+        - protocol == "openai"：必须有 base_url（且是 http）、有模型列表
+        - protocol != "openai"：不要求 base_url，但必须有取 Key 的地址
+
+        [2026-10-25] 新增 tencent_free：腾讯交互翻译的免费免 Key 渠道。
+        它同样不是 OpenAI 兼容协议，且**连 Key 都不需要** —— 所以 key_url
+        指向使用说明页而不是申请页。把它排除在白名单外会让这条测试
+        误判为「协议非法」，实际是契约合法扩展了。
+        """
         for p in list_providers():
-            assert p["id"] and p["name"] and p["base_url"]
-            assert p["base_url"].startswith("http")
-            assert isinstance(p["models"], list)
-            assert p["key_url"].startswith("http")
+            assert p["id"] and p["name"], p
+            assert p["key_url"].startswith("http"), p
+            assert p.get("protocol", "openai") in (
+                "openai", "deepl", "google", "tencent_free"), p
+            if p.get("protocol", "openai") == "openai":
+                assert p["base_url"].startswith("http"), "openai 协议必须有 base_url: %r" % (p,)
+                assert isinstance(p["models"], list)
+
+    def test_dedicated_translate_engines(self):
+        """翻译专用引擎必须在列表里，且不能伪装成 OpenAI 协议。"""
+        by_id = {p["id"]: p for p in list_providers()}
+        for pid in ("deepl", "google_translate"):
+            assert pid in by_id, "缺翻译专用引擎 %s" % pid
+            p = by_id[pid]
+            assert p["protocol"] in ("deepl", "google")
+            assert p["protocol"] != "openai"
+            assert p["group"] == "翻译专用"
+            assert p["note"], "应说明它与 LLM 的区别"
 
     def test_ids_unique(self):
         ids = [p.id for p in PROVIDERS]

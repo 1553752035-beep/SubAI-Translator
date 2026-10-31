@@ -8,6 +8,7 @@ vi.mock('../api', () => ({
   checkHealth: vi.fn(),
   clearCache: vi.fn(),
   getAsrDevice: vi.fn(),
+  getAsrEngine: vi.fn(),
   getCacheStats: vi.fn(),
   getCurrentUser: vi.fn(),
   getLlmStatus: vi.fn(),
@@ -21,11 +22,19 @@ vi.mock('../api', () => ({
   detectLanguage: vi.fn(),
   getOpenApiStats: vi.fn(),
   downloadReport: vi.fn(),
+  probeLlmProviders: vi.fn(),
+  getLlmProviderHealth: vi.fn(),
+  cancelAsrModel: vi.fn(),
+  downloadAsrModel: vi.fn(),
+  getAsrModelStatus: vi.fn(),
+  getSubtitleQuality: vi.fn(),
+  openExternal: vi.fn(),
 }));
 
 import {
   checkHealth,
   getAsrDevice,
+  getAsrEngine,
   getCacheStats,
   getCurrentUser,
   getLanguages,
@@ -34,6 +43,12 @@ import {
   getOpenApiStats,
   getQueueStats,
   getTranslationSettings,
+  probeLlmProviders,
+  getSubtitleQuality,
+  getAsrModelStatus,
+  downloadAsrModel,
+  cancelAsrModel,
+  openExternal,
   setTermMode,
 } from '../api';
 import { SettingsPage } from './SettingsPage';
@@ -57,6 +72,27 @@ beforeEach(() => {
     configured: 'auto', effective_device: 'cpu', compute_type: 'int8',
     ct2_cuda_supported: true, cuda_dll_dirs: [], free_vram_gb: 6.8,
   });
+  // 新增 mock 必须给默认值：页面挂载时会立刻调用它们，
+  // 返回 undefined 会在 .then 上炸掉，整个用例连渲染都过不去
+  vi.mocked(getSubtitleQuality).mockResolvedValue({
+    drop_hallucination: false, hallucination_nsp: 0.6, hallucination_cr: 2.4,
+    max_subtitle_sec: 8, asr_device: 'auto', need_restart_to_apply: true,
+  } as any);
+  vi.mocked(getAsrModelStatus).mockResolvedValue({
+    models: {}, dir: '', downloading: false,
+  } as any);
+  vi.mocked(downloadAsrModel).mockResolvedValue({ ok: true } as any);
+  vi.mocked(cancelAsrModel).mockResolvedValue({ ok: true } as any);
+  vi.mocked(openExternal).mockResolvedValue(undefined as any);
+  vi.mocked(getAsrEngine).mockResolvedValue({
+    engine: 'whisper', denoise: false, sensevoice_itn: true,
+    sensevoice_language: 'auto', vad_threshold: 0.5,
+    vad_min_silence_ms: 100, vad_min_speech_ms: 250,
+    need_restart_to_apply: true, sherpa_installed: false,
+    models: { sensevoice: false, paraformer: false, qwen3: false,
+              vad: false, denoise: false },
+    models_dir: 'models/sherpa',
+  } as any);
   vi.mocked(getLlmStatus).mockResolvedValue({
     mode: 'local',
     effective: { url: 'http://127.0.0.1:5001/v1/chat/completions', model: 'koboldcpp' },
@@ -156,5 +192,57 @@ describe("SettingsPage 版本与更新", () => {
     render(<SettingsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
     expect(await screen.findByText(/检查更新失败：updater 未配置/)).toBeInTheDocument();
+  });
+});
+
+describe('SettingsPage 服务商核验', () => {
+  it('点核验后展示每个服务商的结论', async () => {
+    vi.mocked(probeLlmProviders).mockResolvedValue({
+      results: [
+        { id: 'deepseek', name: 'DeepSeek', verdict: 'auth_failed', detail: 'HTTP 401' },
+        { id: 'yi', name: '零一万物', verdict: 'discontinued', detail: 'model_service_closed' },
+        { id: 'openrouter', name: 'OpenRouter', verdict: 'ok', detail: 'HTTP 200' },
+      ],
+      summary: { total: 3 },
+    } as any);
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '核验全部服务商' }));
+    await waitFor(() => expect(screen.getByText('已停服')).toBeInTheDocument());
+    expect(screen.getByText('Key 无效')).toBeInTheDocument();
+    expect(screen.getByText('可用')).toBeInTheDocument();
+  });
+
+  it('已停服排在网络不可达之前', async () => {
+    vi.mocked(probeLlmProviders).mockResolvedValue({
+      results: [
+        { id: 'openai', name: 'OpenAI', verdict: 'network_error', detail: 'timeout' },
+        { id: 'yi', name: '零一万物', verdict: 'discontinued', detail: 'closed' },
+      ],
+      summary: { total: 2 },
+    } as any);
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '核验全部服务商' }));
+    await waitFor(() => expect(screen.getByText('已停服')).toBeInTheDocument());
+    // 用「结论文字」定位所在行，再取该行的名字单元格。
+    // 直接扫 div 的 textContent 会匹配到外层容器，顺序不可靠。
+    const rowOf = (verdict: string) => {
+      const cell = Array.from(document.querySelectorAll('span'))
+        .find((s) => s.textContent === verdict);
+      return cell?.parentElement as HTMLElement;
+    };
+    const disc = rowOf('已停服');
+    const net = rowOf('本机不可达');
+    expect(disc).toBeTruthy();
+    expect(net).toBeTruthy();
+    // compareDocumentPosition: 4 = DOCUMENT_POSITION_FOLLOWING
+    expect(disc.compareDocumentPosition(net) & 4).toBe(4);
+    expect(disc.children[0].textContent).toBe('零一万物');
+  });
+
+  it('核验失败时给出错误提示，不静默', async () => {
+    vi.mocked(probeLlmProviders).mockRejectedValue(new Error('后端未就绪'));
+    render(<SettingsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '核验全部服务商' }));
+    await waitFor(() => expect(screen.getByText(/后端未就绪/)).toBeInTheDocument());
   });
 });

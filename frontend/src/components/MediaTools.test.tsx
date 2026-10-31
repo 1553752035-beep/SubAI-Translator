@@ -8,6 +8,9 @@ vi.mock('../api', () => ({
   getTaskSubtitles: vi.fn(),
   getVoices: vi.fn(),
   downloadOutput: vi.fn(),
+  // [2026-10-25] 新增：可内嵌字体列表。组件挂载时会拉一次，
+  // 没 mock 会抛 undefined is not a function，带挂整个文件 13 项测试。
+  getEmbeddableFonts: vi.fn(),
 }));
 
 import {
@@ -16,6 +19,7 @@ import {
   dubSubtitles,
   getTaskSubtitles,
   getVoices,
+  getEmbeddableFonts,
   muxSoftsub,
 } from '../api';
 import type { TaskRecord } from '../types';
@@ -27,6 +31,7 @@ const mDub = vi.mocked(dubSubtitles);
 const mSubs = vi.mocked(getTaskSubtitles);
 const mVoices = vi.mocked(getVoices);
 const mDownload = vi.mocked(downloadOutput);
+const mFonts = vi.mocked(getEmbeddableFonts);
 
 const task = (over: Partial<TaskRecord> = {}): TaskRecord => ({
   task_id: 't1',
@@ -49,6 +54,11 @@ const task = (over: Partial<TaskRecord> = {}): TaskRecord => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mVoices.mockResolvedValue({ engine: 'fake', voices: [{ name: 'voice-a', culture: 'zh-CN', engine: 'fake' }] });
+  // 默认给一个可选字体；个别用例可改成空数组来验证「不显示下拉」
+  mFonts.mockResolvedValue({
+    available: [{ family: 'SimHei', path: 'C:/Windows/Fonts/simhei.ttf', size: 10 }],
+    font_dirs: ['C:/Windows/Fonts'],
+  });
   mSubs.mockResolvedValue({
     task_id: 't1', status: 'completed', kind: 'bilingual', file: 'D:/out/demo.bilingual.srt',
     segments: [
@@ -91,6 +101,42 @@ describe('MediaTools', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: '下载' }));
     expect(mDownload).toHaveBeenCalledWith('demo.hardsub.mp4');
+  });
+
+  it('压制：展开样式面板后，颜色/描边/位置随请求提交', async () => {
+    mBurn.mockResolvedValue({ output_path: 'D:/out/demo.hardsub.mp4', filename: 'demo.hardsub.mp4' });
+    render(<MediaTools task={task()} />);
+
+    // 样式面板默认折叠（避免给只调字号的用户增加视觉噪音）。
+    // 注意：jsdom 不像浏览器那样把 <details> 折叠内容从 DOM 移除，
+    // 所以断言 open 属性而非「查不到子节点」——后者会得到假阴性。
+    const panel = (await screen.findByText(/字幕样式/)).closest('details') as HTMLDetailsElement;
+    expect(panel.open).toBe(false);
+    // 直接置 open 并派发 toggle（jsdom 不实现点击 summary 的默认展开行为）
+    panel.open = true;
+    fireEvent(panel, new Event('toggle'));
+
+    fireEvent.change(await screen.findByLabelText('文字颜色'), { target: { value: '#ffd700' } });
+    fireEvent.change(screen.getByLabelText('描边宽度'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('字幕位置'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始压制' }));
+
+    await waitFor(() => expect(mBurn).toHaveBeenCalledTimes(1));
+    const payload = mBurn.mock.calls[0][0] as any;
+    expect(payload.style).toEqual({
+      primary_color: '#ffd700',
+      outline: 3,
+      alignment: 8,
+    });
+  });
+
+  it('压制：没动样式面板时不提交 style 字段（保持旧行为）', async () => {
+    mBurn.mockResolvedValue({ output_path: 'D:/out/demo.hardsub.mp4', filename: 'demo.hardsub.mp4' });
+    render(<MediaTools task={task()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '开始压制' }));
+
+    await waitFor(() => expect(mBurn).toHaveBeenCalledTimes(1));
+    expect(mBurn.mock.calls[0][0]).not.toHaveProperty('style');
   });
 
   it('封装：把所有字幕文件作为轨道提交', async () => {

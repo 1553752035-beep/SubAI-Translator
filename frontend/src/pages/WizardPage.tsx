@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  getAsrEngine,
   getTaskStatus,
   openInExplorer,
   submitAlignTask,
   submitComposeTask,
+  listGlossary,
+  saveGlossarySeries,
   submitTranscodeTask,
   uploadVideoFile,
 } from '../api';
@@ -64,6 +67,58 @@ export function WizardPage({
   const [target, setTarget] = useState('中文');
   const [sourceFrom, setSourceFrom] = useState<'asr' | 'hardsub'>('asr');
   const [outputVideo, setOutputVideo] = useState<OutputVideo>('soft');
+  // [2026-10-25] 逐任务选 ASR 引擎。空串 = 跟随设置页的全局配置，
+  // 只有用户明确选了才覆盖 —— 大多数人不需要碰这一项。
+  const [asrEngine, setAsrEngine] = useState<string>('');
+  const [engineInfo, setEngineInfo] = useState<{
+    current?: string;
+    available?: Record<string, boolean>;
+  }>({});
+  // [P1 2026-10-24] 「我已有字幕文件」时，是否先翻译这份字幕再出片。
+  // 以前只有「直接套用」，想翻译必须回头重跑识别（白等一遍 ASR）；
+  // 现在等价于 CLI 的 --translate-only，对本地隐私流程尤其有用。
+  const [translateSub, setTranslateSub] = useState(false);
+  // 五期 P2：专有名词词表（每行一个；G: 前缀表示游戏名，其余按人名处理 → 音译）
+  const [glossaryText, setGlossaryText] = useState('');
+  const [savedLists, setSavedLists] = useState<{ id: number; name: string; terms: { src: string; type?: string; variants?: string[] }[] }[]>([]);
+  const [pickedList, setPickedList] = useState<number | null>(null);
+  // 词表每行一条，三种写法（后两种是 2026-10-24 新增的可选扩展，老写法完全不变）：
+  //   橘长                     → 人名，走音译
+  //   G:怪猎                   → 游戏名
+  //   甲修 ← 甲球,甲秋          → 带变体纠正：ASR 听成「甲球」「甲秋」时自动改回「甲修」
+  //   G:碰瓷M7 ← possm7        → 游戏名 + 变体，可组合
+  // 变体走的是「强制替换」（src/glossary.py 的 variants 通道），收的是「既不同音、
+  // 长度也可能不同」的误识别，比如 possm7 → 碰瓷M7。填错就会改错，所以只收确认过的写法。
+  const parsedGlossary = () => glossaryText
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((raw) => {
+      const isGame = raw.startsWith('G:') || raw.startsWith('g:');
+      const body = isGame ? raw.slice(2).trim() : raw;
+      const arrow = body.split(/←|<-|<=/);
+      const src = (arrow[0] || '').trim();
+      const variants = arrow.length > 1
+        ? arrow.slice(1).join(' ').split(/[,，、|]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+      const term: { src: string; type: string; variants?: string[] } = {
+        src, type: isGame ? 'game' : 'person',
+      };
+      if (variants.length) term.variants = variants;
+      return term;
+    })
+    .filter((t) => t.src);
+
+  useEffect(() => {
+    listGlossary().then((r) => setSavedLists(r.series || [])).catch(() => {});
+    // 引擎可用性只用来把选项置灰，拿不到就当作全部可用（不阻断主流程）
+    getAsrEngine()
+      .then((r: any) => setEngineInfo({
+        current: r.engine || '',
+        available: r.models || {},
+      }))
+      .catch(() => {});
+  }, []);
   const [subtitleMode, setSubtitleMode] = useState<'asr' | 'file'>('asr');
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [script, setScript] = useState('兄弟们这波看我操作\n别急，等他先动\n就是现在，压枪\n三杀，直接带走');
@@ -124,7 +179,8 @@ export function WizardPage({
         newTaskId = r.task_id;
       } else if (intent === 'subtitle' && subtitleMode === 'file') {
         if (!subtitleFile) throw new Error('请选择字幕文件');
-        const r = await submitComposeTask(file, subtitleFile, outputVideo);
+        const r = await submitComposeTask(
+          file, subtitleFile, outputVideo, translateSub ? target : 'none');
         newTaskId = r.task_id;
       } else {
         const up = await uploadVideoFile(file);
@@ -135,6 +191,9 @@ export function WizardPage({
           output_format: 'srt',
           output_video: outputVideo,
           defer_render: true,   // 五期：两段式——先出字幕草稿，确认后再出片
+          // 五期 P2：专有名词词表（G: 前缀 = 游戏名，其余按人名走音译）
+          glossary: parsedGlossary(),
+          ...(asrEngine ? { asr_engine: asrEngine } : {}),
         };
         const r = await submitTranscodeTask(payload);
         newTaskId = r.task_id;
@@ -287,6 +346,64 @@ export function WizardPage({
                 </div>
               )}
 
+                <div className="w-row">
+                <div>
+                  <div className="k">专有名词 / 听错纠正（可选）</div>
+                  <div className="h">
+                    每行一条。游戏名加 G: 前缀。要纠正识别错误用『←』写法：
+                    <code>甲修 ← 甲球</code> 表示听到「甲球」就改回「甲修」；多个变体用逗号分隔
+                  </div>
+                </div>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <textarea
+                    className="w-area"
+                    style={{ minHeight: 56, fontSize: 12 }}
+                    placeholder={'橘长\nG:怪猎\n甲修 ← 甲球,甲秋\nG:碰瓷M7 ← possm7'}
+                    value={glossaryText}
+                    onChange={(e) => setGlossaryText(e.target.value)}
+                  />
+                  {savedLists.length > 0 && (
+                    <div className="w-chips" style={{ marginTop: 6 }}>
+                      {savedLists.map((s) => (
+                        <span
+                          key={s.id}
+                          className={'w-chip' + (pickedList === s.id ? ' on' : '')}
+                          title="点一下载入这份词表"
+                          onClick={() => {
+                            setPickedList(s.id);
+                            // 载入时把 variants 一并还原成「src ← a,b」写法，
+                            // 否则「点一下载入」会静默丢掉变体（只留 src），用户存回去就把变体抹了
+                            setGlossaryText(s.terms.map((t) => {
+                              const anyT = t as { src: string; type?: string; variants?: string[] };
+                              const prefix = anyT.type === 'game' ? 'G:' : '';
+                              const v = anyT.variants && anyT.variants.length
+                                ? ' ← ' + anyT.variants.join(',')
+                                : '';
+                              return prefix + anyT.src + v;
+                            }).join('\n'));
+                          }}
+                        >{s.name}</span>
+                      ))}
+                      {glossaryText.trim() && (
+                        <span
+                          className="w-chip"
+                          title="把当前内容存成可复用的词表"
+                          onClick={async () => {
+                            const name = window.prompt('给这份词表起个名字（如「橘长的三角洲」）');
+                            if (!name) return;
+                            try {
+                              const saved = await saveGlossarySeries(name, parsedGlossary());
+                              setSavedLists([saved, ...savedLists.filter((x) => x.id !== saved.id)]);
+                              setPickedList(saved.id);
+                            } catch { /* 失败静默，不打断主流程 */ }
+                          }}
+                        >存为词表</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="w-row">
                 <div><div className="k">成品形式</div><div className="h">软字幕最快；要发手机看就选硬字幕</div></div>
                 <div className="w-chips">
@@ -295,6 +412,49 @@ export function WizardPage({
                   <span className={'w-chip' + (outputVideo === 'both' ? ' on' : '')} onClick={() => setOutputVideo('both')}>两个都要</span>
                 </div>
               </div>
+
+              {/* [2026-10-25] 逐任务选 ASR 引擎。
+                  实测同一段 146 秒游戏解说：paraformer 3.9s / sensevoice 4.1s /
+                  qwen3 23.0s，而粤语和英语说唱是 qwen3 明显更准。
+                  只能全局改的话，批量处理混合素材做不到。 */}
+              {intent !== 'script' && (
+                <div className="w-row">
+                  <div>
+                    <div className="k">识别引擎</div>
+                    <div className="h">
+                      默认跟随设置页；纯中文选 SenseVoice 最快，
+                      粤语/中英混说/英文说唱选 Qwen3 更准但慢约 5 倍
+                    </div>
+                  </div>
+                  <div className="w-chips">
+                    <span className={'w-chip' + (asrEngine === '' ? ' on' : '')}
+                          onClick={() => setAsrEngine('')}>
+                      跟随设置{engineInfo.current ? `（${engineInfo.current}）` : ''}
+                    </span>
+                    {([
+                      ['sensevoice', 'SenseVoice', '中文最快'],
+                      ['paraformer', 'Paraformer', '中文稳定'],
+                      ['qwen3', 'Qwen3', '多语种最准'],
+                    ] as const).map(([id, label, hint]) => {
+                      // whisper 不在此列：它由 faster-whisper 提供，
+                      // 不依赖 sherpa 模型目录，不受 models 字段约束
+                      const usable = engineInfo.available?.[id] !== false;
+                      return (
+                        <span
+                          key={id}
+                          className={'w-chip' + (asrEngine === id ? ' on' : '')}
+                          title={usable ? hint : '模型未安装，无法使用'}
+                          aria-disabled={!usable}
+                          style={usable ? undefined : { opacity: 0.45, cursor: 'not-allowed' }}
+                          onClick={() => { if (usable) setAsrEngine(id); }}
+                        >
+                          {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {intent === 'subtitle' && subtitleMode === 'file' && (
@@ -305,6 +465,31 @@ export function WizardPage({
                   onChange={(e) => setSubtitleFile(e.target.files?.[0] ?? null)}
                 />
                 {subtitleFile && <span style={{ marginLeft: 10, color: 'var(--w-dim)' }}>{subtitleFile.name}</span>}
+              </div>
+            )}
+
+            {/* [P1 2026-10-24] 已有字幕时可选「先翻译再出片」，等价 CLI --translate-only */}
+            {intent === 'subtitle' && subtitleMode === 'file' && (
+              <div className="w-row" style={{ marginTop: 12 }}>
+                <div>
+                  <div className="k">要不要翻译这份字幕</div>
+                  <div className="h">
+                    直接套用 = 原字幕不动；先翻译 = 跳过识别，只跑翻译再出片（省一遍 ASR）
+                  </div>
+                </div>
+                <div className="w-chips">
+                  <span className={'w-chip' + (!translateSub ? ' on' : '')}
+                        onClick={() => setTranslateSub(false)}>直接套用</span>
+                  <span className={'w-chip' + (translateSub ? ' on' : '')}
+                        onClick={() => setTranslateSub(true)}>先翻译再出片</span>
+                  {translateSub && (
+                    <select className="w-select" value={target}
+                            aria-label="字幕翻译目标语言"
+                            onChange={(e) => setTarget(e.target.value)}>
+                      {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  )}
+                </div>
               </div>
             )}
 

@@ -161,6 +161,46 @@ class ASRConfig(BaseSettings):
     cpu_threads: int = Field(default=8, description="CPU推理线程数（仅device=cpu时生效）")
     vad_filter: bool = Field(default=True, description="是否启用语音活动检测")
     word_timestamps: bool = Field(default=True, description="是否返回单词级时间戳")
+    # [P0 2026-10-24] 丢弃疑似幻觉段。默认关（保守）：开着是「宁可少一行，不可凭空编一句」。
+    # 实测证据：同一视频 GPU(float16) 第一行是「没事我有大血包」(真实)，
+    # CPU(int8) 却凭空生出「而且卡不了星标」——用户根本没说过这句（人耳复核确认）。
+    # 丢弃的内容会逐条打日志，绝不静默删除。
+    drop_hallucination: bool = Field(
+        default=False,
+        description="丢弃 no_speech_prob/压缩比超阈值的疑似幻觉段（丢弃内容会记日志）")
+    hallucination_nsp: float = Field(default=0.6, description="幻觉判定：no_speech_prob 阈值")
+    hallucination_cr: float = Field(default=2.4, description="幻觉判定：压缩比阈值")
+
+    # ---- sherpa-onnx 引擎（2026-10-25）----
+    # engine=whisper 走原来的 faster-whisper（默认，行为完全不变）；
+    # engine=sensevoice / paraformer 走 sherpa-onnx（段级模型，中文更强、快 2~4 倍）。
+    # 选 sherpa 的取舍见 src/asr_sherpa.py 文件头与项目总方案「同类项目调研」章节：
+    # 换来更好的中文识别与速度，代价是**没有词级时间戳**（时间轴来自 VAD 段边界）。
+    # [2026-10-25] 引擎扩充：
+    #   qwen3    - LLM 结构，多语言覆盖最广（日/粤/中英混说），慢且占 936MB
+    #   firered  - 中英 + 方言，单文件 739MB
+    engine: str = Field(
+        default="whisper",
+        description="ASR引擎: whisper|sensevoice|paraformer|qwen3|firered",
+    )
+    sensevoice_itn: bool = Field(default=True, description="SenseVoice 逆文本规整（数字转阿拉伯数字）")
+    sensevoice_language: str = Field(default="auto", description="SenseVoice 语言: auto|zh|en|ja|ko|yue")
+    vad_threshold: float = Field(default=0.5, description="Silero VAD 阈值（越高越严格）")
+    vad_min_silence_ms: int = Field(default=100, description="VAD 最小静音时长（毫秒）")
+    vad_min_speech_ms: int = Field(default=250, description="VAD 最小语音时长（毫秒）")
+    vad_max_speech_sec: float = Field(default=0.0, description="VAD 单段最大时长秒（0=不限）")
+    # GTCRN 降噪默认关：实测会把「有敌人」改成「就敌人」，属引入新错误。
+    # 只适合「人声被噪声淹没」的素材，不适合本来就干净的音轨。
+    denoise: bool = Field(default=False, description="GTCRN 降噪（默认关，噪声素材可开）")
+
+    # ---- 说话人分离 [2026-10-25] ----
+    # 动机：两三人对谈的视频，字幕看不出谁在说话，翻译出来人称代词全乱
+    # （日语「私」「僕」尤其明显）。分离后每条字幕带 speaker 字段。
+    diarize: bool = Field(default=False, description="开启说话人分离（默认关，多人对谈素材再开）")
+    diarize_speakers: int = Field(default=-1, description="强制说话人数；-1=自动判断")
+    # 阈值实测：0.5 会把单人游戏配音+背景音误判成 3 人（过度聚类），
+    # 0.85~0.95 更稳。默认给 0.9，让「自动」在真实素材上靠得住。
+    diarize_threshold: float = Field(default=0.9, description="自动判断人数时的聚类阈值，越大越保守")
 
 
 class LLMConfig(BaseSettings):
@@ -178,12 +218,33 @@ class LLMConfig(BaseSettings):
     cloud_url: str = Field(default="", description="云端LLM地址（OpenAI兼容接口）")
     cloud_api_key: str = Field(default="", description="云端LLM API密钥")
     cloud_model: str = Field(default="gpt-4o", description="云端LLM模型名")
+
+    # [2026-10-25] 翻译专用引擎（非 OpenAI 协议）。
+    # 与 LLM 互补：LLM 会漏句/改写/合并行，专用翻译不会，但不懂上下文。
+    #   protocol = openai（默认，走 cloud_url）/ deepl / google
+    #   [2026-10-25] 新增 tencent_free：免费免 Key 渠道，用户不填任何 Key 也能出片。
+    #   实测 544ms、多条对齐正确。没有它，用户必须先注册+实名+充值才能用，
+    #   这道门槛把「只想给视频加个字幕」的人全挡在外面。
+    protocol: str = Field(default="openai",
+                          description="翻译协议: openai|deepl|google|tencent_free")
+    engine_api_key: str = Field(default="", description="翻译专用引擎的 Key（DeepL/Google）")
+    deepl_tier: str = Field(default="free", description="DeepL 档位: free|pro（决定端点域名）")
+    deepl_glossary_id: str = Field(default="", description="DeepL 术语表 ID（可选）")
     
     # 通用配置
     timeout: float = Field(default=180.0, description="翻译请求超时时间（秒）")
     max_tokens: int = Field(default=256, description="最大输出token数")
     temperature: float = Field(default=0.2, description="翻译温度参数")
     batch_size: int = Field(default=8, description="批量翻译大小")
+    # 五期：本地 raw completion 模式。
+    # StreamRevise 这类「指令全在 user 里」的模型，走 chat 端点会被套错模板，
+    # 实测输出截断/不翻译（「传送门」→GG、「这哪」→Where）；走 raw completion
+    # （<｜hy_User｜>指令+源文<｜hy_Assistant｜>）才正确。云端不设此项。
+    raw_mode: bool = Field(default=False, description="本地模型用 /v1/completions 原始补全端点")
+    # 五期：翻译前视频语境摘要（一次 LLM 调用生成，注入后续每批翻译）
+    # 失败静默降级——摘要是增强，永远不能拖垮翻译本身。
+    context_enabled: bool = Field(default=True, description="翻译前是否生成视频语境摘要")
+    context_max_chars: int = Field(default=2000, description="摘要输入的采样字数上限（超出则截断）")
     
     # 重试配置
     max_retries: int = Field(default=3, description="最大重试次数")
@@ -385,6 +446,11 @@ class SubAIConfig(BaseSettings):
     max_chars: int = Field(default=20, description="每行最大字符数")
     max_dur: float = Field(default=6.0, description="每行最大时长（秒）")
     break_punct: str = Field(default="。！？!?…；;，,、", description="断句标点")
+    # [2026-10-25] 最短显示时长（秒）。此前只有「最长 8 秒」上限，没有下限，
+    # 实测会切出 0.15 秒的「给我」这种一行——字出来了但人眼来不及读。
+    # 延长时只动 end、不越过下一行起点，因此不会造成两行同时显示。
+    # 设 0 可关闭。环境变量 SUBAI_MIN_DISPLAY_SEC 可覆盖。
+    min_display_sec: float = Field(default=1.0, description="每行最短显示时长（秒，0=关闭）")
     
     @property
     def plugins_dir(self) -> str:
@@ -516,23 +582,95 @@ class SubAIConfig(BaseSettings):
 # 全局配置实例
 # --------------------------------------------------------------------------- #
 
-_ENV_PATH = os.path.join(_project_root(), ".env")
+def _env_candidates() -> list:
+    """按优先级返回 .env 候选路径（越靠前优先级越高）。
+
+    顺序：`SUBAI_ENV_FILE` 显式指定 → 用户级 `%APPDATA%/SubAI/.env` → 安装/仓库根 `.env`。
+
+    [P0 2026-10-24] 增加用户级位置：API Key 等机密不再必须躺在分发目录里，
+    用户级文件不会被"整个文件夹拷给别人"带走。
+    """
+    candidates: list = []
+    explicit = (os.environ.get("SUBAI_ENV_FILE") or "").strip()
+    if explicit:
+        candidates.append(explicit)
+    user_dir = (os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or "").strip()
+    if user_dir:
+        candidates.append(os.path.join(user_dir, "SubAI", ".env"))
+    candidates.append(os.path.join(_project_root(), ".env"))
+    return candidates
+
+
+def _env_write_path() -> str:
+    """`persist_env` 的默认写入位置：用户级目录优先，不可用时回落项目根。
+
+    [P0 2026-10-24] 与读取顺序保持一致，避免"写进分发目录、读却优先用户级"的错位。
+    """
+    explicit = (os.environ.get("SUBAI_ENV_FILE") or "").strip()
+    if explicit:
+        return explicit
+    user_dir = (os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or "").strip()
+    if user_dir:
+        user_path = os.path.join(user_dir, "SubAI", ".env")
+        try:
+            os.makedirs(os.path.dirname(user_path), exist_ok=True)
+            return user_path
+        except Exception:  # noqa: BLE001
+            pass
+    return os.path.join(_project_root(), ".env")
+
+
+_ENV_PATH = next(
+    (p for p in _env_candidates() if os.path.isfile(p)),
+    os.path.join(_project_root(), ".env"),
+)
 
 
 def _load_env_file() -> None:
-    """把项目根目录的 .env 注入 os.environ（不覆盖已存在的环境变量）。
+    """把 .env 注入 os.environ（不覆盖已存在的环境变量）。
 
     这是让 .env 生效的唯一入口:分段配置是独立 BaseSettings,只认 os.environ。
+    按 `_env_candidates()` 顺序依次加载；`override=False` 保证先加载者胜出，
+    因此真实环境变量 > 用户级 .env > 安装根 .env。
     """
     try:
-        if os.path.isfile(_ENV_PATH):
-            from dotenv import load_dotenv
-            load_dotenv(_ENV_PATH, override=False)
+        from dotenv import load_dotenv
     except Exception:  # noqa: BLE001
-        pass
+        return
+    for path in _env_candidates():
+        try:
+            if os.path.isfile(path):
+                load_dotenv(path, override=False)
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def normalize_no_proxy() -> None:
+    """去掉 NO_PROXY/no_proxy 里 IPv6 的方括号写法。
+
+    [P1 2026-10-24] httpx 在 trust_env=True 时会把 NO_PROXY 的每一项**按 URL 解析**，
+    `[::1]` 这种带方括号的写法会被解析成 port=':1]' 并直接抛
+    `httpx.InvalidURL: Invalid port: ':1]'` —— 后果是**所有** httpx 请求失败：
+    连本地 koboldcpp、连云端 API、连自检的连通性探测全部不可达，
+    表现为「本地翻译不可达 / 云端 401 之外的各种莫名错误」，且与业务代码无关。
+    必须在任何 httpx 调用之前归一化（本函数在模块导入期执行）。
+    """
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = os.environ.get(key)
+        if not raw:
+            continue
+        fixed = []
+        for part in (p.strip() for p in raw.split(",")):
+            if not part:
+                continue
+            if part.startswith("[") and part.endswith("]") and ":" in part:
+                part = part[1:-1]
+            fixed.append(part)
+        os.environ[key] = ",".join(fixed)
 
 
 _load_env_file()
+normalize_no_proxy()
 
 # 单例模式，全局共享配置
 config = SubAIConfig()
@@ -557,9 +695,10 @@ def persist_env(updates: dict, env_path: Optional[str] = None) -> str:
     """把若干键写入 .env（存在则整行替换，不存在则追加）。
 
     用于把运行期修改的设置（如翻译模式）落盘，重启后仍生效。
-    打包运行时工作目录即安装目录，.env 与 config 的 env_file 位置一致。
+    默认写入 `_env_write_path()`：用户级 `%APPDATA%/SubAI/.env` 优先，
+    这样设置页保存的云端 API Key 不会落进分发目录（[P0 2026-10-24]）。
     """
-    path = env_path or os.path.join(_project_root(), ".env")
+    path = env_path or _env_write_path()
     lines: list[str] = []
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:

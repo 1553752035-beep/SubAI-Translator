@@ -33,27 +33,80 @@ def _models_url(chat_url: str) -> str:
     return ""
 
 
+# [2026-10-25] HTTP 状态码 -> 语义。
+#
+# 原来的判据是 reachable = status_code < 500，这意味 401/403/404 全算「可达」。
+# 后果很难受：用户填了一个**完全无效的 key**，页面显示「端点可达」，
+# 直到真正跑翻译才报错 —— 而那时已经浪费时间了。
+# 这两者是不同的问题，必须分开报：
+#   端点能不能连上（网络层）  vs  这个 key 在这台服务上能不能用（认证层）
+_STATUS_MEANING = {
+    200: ("ok", "正常"),
+    400: ("bad_request", "请求被拒绝（模型名或参数不对）"),
+    401: ("auth_failed", "密钥无效或已过期"),
+    402: ("no_balance", "账户余额不足"),
+    403: ("forbidden", "无权限（密钥无该模型权限，或地区受限）"),
+    404: ("not_found", "端点或模型不存在（地址可能已变更）"),
+    429: ("rate_limited", "请求过于频繁或被限流"),
+    # [2026-10-25] 410 Gone：服务方明确声明该接口/模型已停止提供。
+    # 实测 01.AI（yi）的 /v1/models 返回 410 + model_service_closed，
+    # 而我们仍把它列在 provider 列表里 —— 用户填 key 也永远不会成功。
+    410: ("discontinued", "该服务或模型已被官方停止提供（需更换服务商）"),
+}
+
+
+def _classify(status_code: int) -> tuple:
+    """把 HTTP 状态码归类成 (code, 中文说明)，未知码给保守判断。"""
+    if status_code in _STATUS_MEANING:
+        return _STATUS_MEANING[status_code]
+    if 200 <= status_code < 300:
+        return ("ok", "正常")
+    if 500 <= status_code:
+        return ("server_error", "服务端错误（非密钥问题）")
+    return ("unexpected", "未预期的状态码 %d" % status_code)
+
+
 def probe(url: str, api_key: str = "", timeout: float = _PROBE_TIMEOUT) -> dict:
-    """探测端点可达性。返回 configured/reachable/detail/probe_url。"""
+    """探测端点**与密钥**的可用性。
+
+    返回 configured / reachable / authorized / verdict / detail / probe_url。
+
+    [2026-10-25] 语义变更（重要）：
+    - reachable：服务器有没有应答（网络层）。5xx 仍算 reachable=False，因为它没法干活。
+    - authorized：这个 key 在这台服务上**能不能用**。401/402/403 判 False。
+    - verdict：ok / auth_failed / not_found / rate_limited / ... 供 UI 直接显示。
+
+    为什么不能用「< 500」当通过：401 说明 key 是废的，403 说明没有该模型权限，
+    404 说明地址或模型名已经过期。这三种情况用户**必须**被明确告知，
+    否则「显示正常、一跑就错」比直接报错更消耗信任。
+    """
     if not url:
-        return {"configured": False, "reachable": False, "detail": "未配置端点", "probe_url": ""}
+        return {"configured": False, "reachable": False, "authorized": False,
+                "verdict": "not_configured", "detail": "未配置端点", "probe_url": ""}
 
     headers = {"Authorization": "Bearer " + api_key} if api_key else {}
     probe_url = _models_url(url)
     try:
         r = httpx.get(probe_url, headers=headers, timeout=timeout)
+        verdict, meaning = _classify(r.status_code)
+        # 5xx 是服务端故障：网络通但用不了
         reachable = r.status_code < 500
+        authorized = verdict in ("ok", "rate_limited")
         return {
             "configured": True,
             "reachable": reachable,
+            "authorized": authorized,
+            "verdict": verdict,
             "http_status": r.status_code,
-            "detail": "HTTP %d" % r.status_code,
+            "detail": "HTTP %d（%s）" % (r.status_code, meaning),
             "probe_url": probe_url,
         }
     except Exception as e:  # noqa: BLE001
         return {
             "configured": True,
             "reachable": False,
+            "authorized": False,
+            "verdict": "network_error",
             "detail": "%s: %s" % (type(e).__name__, str(e)[:120]),
             "probe_url": probe_url,
         }
@@ -75,6 +128,29 @@ def status(probe_cloud: bool = False) -> dict:
     if probe_cloud and has_cloud_key and config.llm.cloud_url:
         cloud["reachable"] = probe(config.llm.cloud_url, config.llm.cloud_api_key)["reachable"]
 
+    # [2026-10-25] 翻译专用引擎状态（DeepL / Google）。
+    # 它们不走 OpenAI 协议，所以「有没有 base_url」不能用来判断可用性，
+    # 只看有没有 Key。用户在设置页能看到「现在实际用的是哪个引擎」，
+    # 避免出现「选了 DeepL 但没填 Key，实际还在走 LLM」这种错觉。
+    _proto = (getattr(config.llm, "protocol", "openai") or "openai").strip().lower()
+    _eng_key = bool(getattr(config.llm, "engine_api_key", ""))
+    dedicated = {
+        "protocol": _proto,
+        "is_dedicated": _proto in ("deepl", "google"),
+        "has_key": _eng_key,
+        "configured": _eng_key if _proto in ("deepl", "google") else False,
+    }
+    if _proto == "deepl":
+        dedicated["tier"] = getattr(config.llm, "deepl_tier", "free")
+        dedicated["endpoint"] = ("https://api-free.deepl.com/v2/translate"
+                                 if dedicated["tier"] == "free"
+                                 else "https://api.deepl.com/v2/translate")
+        dedicated["glossary_id"] = getattr(config.llm, "deepl_glossary_id", "")
+        dedicated["name"] = "DeepL"
+    elif _proto == "google":
+        dedicated["endpoint"] = "https://translation.googleapis.com/language/translate/v2"
+        dedicated["name"] = "Google 翻译"
+
     return {
         "mode": config.llm.mode,
         "modes": ["local", "cloud", "hybrid"],
@@ -86,6 +162,7 @@ def status(probe_cloud: bool = False) -> dict:
             "detail": local["detail"],
         },
         "cloud": cloud,
+        "dedicated": dedicated,
     }
 
 

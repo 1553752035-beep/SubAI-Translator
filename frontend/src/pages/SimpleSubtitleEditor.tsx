@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { getTaskStatus, getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
+import { deleteTasks, getTaskStatus, getTaskSubtitles, renderTaskVideo, saveTaskSubtitles } from '../api';
 import type { SubtitleSegment } from '../types';
+import { WaveformView } from '../components/WaveformView';
 import '../styles/wizard.css';
 
 type Row = { id: string; start: number; end: number; source: string; translation: string; words?: number[] };
@@ -22,7 +23,12 @@ const mmss = (t: number): string => {
 let seq = 0;
 const newId = (): string => 'r' + (++seq).toString(36) + Date.now().toString(36).slice(-4);
 
-export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onClose?: () => void }) {
+export function SimpleSubtitleEditor({ taskId, onClose, breadcrumb }: {
+  taskId: string;
+  onClose?: () => void;
+  /** 面包屑（如 ['主界面','任务列表','确认字幕']），由 App 按来源传入 */
+  breadcrumb?: string[];
+}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [cur, setCur] = useState(0);
   const [editing, setEditing] = useState(-1);
@@ -31,6 +37,7 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
   const [busy, setBusy] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [msg, setMsg] = useState('');
+  const [savedCount, setSavedCount] = useState(0);   // 上次保存时的改动数，用于拦截「未保存就返回」
   const [splitting, setSplitting] = useState<{ id: string; pos: number; at: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -52,6 +59,8 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
     setTimeEdit(null);
   };
   const [videoUrl, setVideoUrl] = useState('');
+  /** 媒体文件系统绝对路径（波形接口用，不能从 videoUrl 反推） */
+  const [mediaPath, setMediaPath] = useState('');
   const [vt, setVt] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stackRef = useRef<Act[]>([]);
@@ -63,6 +72,9 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
         const t = await getTaskStatus(taskId);
         const vp = (t as unknown as { video_path?: string }).video_path || "";
         if (!vp) return;
+        // 原始路径要单独存：convertFileSrc 之后拿不回文件系统路径，
+        // 而波形接口需要真实路径去调 ffmpeg 解码。
+        setMediaPath(vp);
         const { convertFileSrc } = await import("@tauri-apps/api/core");
         setVideoUrl(convertFileSrc(vp));
       } catch { /* 预览不可用不影响编辑 */ }
@@ -292,11 +304,27 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
     try {
       const segs: SubtitleSegment[] = rows.map((r) => ({ start: r.start, end: r.end, source: r.source, translation: r.translation }));
       await saveTaskSubtitles(taskId, segs);
+      setSavedCount(Object.values(dirty).filter(Boolean).length);
       setMsg('已保存，字幕文件已更新');
       return true;
     } catch (e: any) {
       setMsg('保存失败：' + String(e?.response?.data?.detail || e?.message || e));
       return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 取消：放弃本任务 —— 字幕草稿丢弃，任务归档进回收站（可恢复），源视频绝不改动
+  const handleCancel = async () => {
+    if (!window.confirm('取消这个任务吗？\n\n· 字幕草稿会被丢弃\n· 任务移到「回收站」（可恢复）\n· 源视频不会被改动')) return;
+    setBusy(true);
+    setMsg('');
+    try {
+      await deleteTasks([taskId]);
+      onClose?.();
+    } catch (e: any) {
+      setMsg('取消失败：' + String(e?.response?.data?.detail || e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -330,7 +358,20 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
           <div className="w-conf-stat">共 {rows.length} 行　·　<b style={{ color: '#8a5a00' }}>可疑 {suspectCount} 处</b>　·　已改 {dirtyCount} 处</div>
           <div className="w-sub" style={{ marginTop: 6 }}><span className="w-kbd">↑</span><span className="w-kbd">↓</span> 切换行 · <span className="w-kbd">Enter</span> 编辑 · <span className="w-kbd">Esc</span> 退出 · <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Z</span> 撤销 · 编辑时 <span className="w-kbd">Ctrl</span>+<span className="w-kbd">Enter</span> 拆分</div>
         </div>
-        {onClose && <button className="w-btn w-ghost" onClick={onClose}>← 返回主界面</button>}
+        {onClose && (
+          <button className="w-btn w-ghost" onClick={() => {
+            if (dirtyCount > savedCount) {
+              const n = dirtyCount - savedCount;
+              if (!window.confirm('还有 ' + n + ' 处改动没有保存，返回后这些改动会丢失。\n\n仍要返回吗？（想保留请先点「保存草稿」）')) return;
+            }
+            onClose();
+          }}>← 返回主界面</button>
+        )}
+        {breadcrumb && breadcrumb.length > 0 && (
+          <span className="w-sub" style={{ fontSize: 12 }}>
+            {breadcrumb.join(' / ')}
+          </span>
+        )}
       </div>
       <div className="w-conf-grid">
         <div>
@@ -351,6 +392,19 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
                 <div className="w-cap">{textOf(liveRow)}</div>
               )}
             </div>
+            {mediaPath && (
+              <WaveformView
+                mediaPath={mediaPath}
+                currentTime={vt}
+                segments={rows.map((r2) => ({ start: r2.start, end: r2.end }))}
+                onSeek={(sec) => {
+                  setVt(sec);
+                  if (videoRef.current) {
+                    try { videoRef.current.currentTime = sec; } catch { /* 未加载完时忽略 */ }
+                  }
+                }}
+              />
+            )}
             <div className="w-bar">
               {rows.map((r2) => (
                 <span key={r2.id} className="seg" style={{ left: ((r2.start / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%', width: ((Math.max(0.05, r2.end - r2.start) / Math.max(0.01, rows[rows.length - 1]?.end || 1)) * 100) + '%' }} />
@@ -486,6 +540,7 @@ export function SimpleSubtitleEditor({ taskId, onClose }: { taskId: string; onCl
       </div>
       <div className="w-conf-foot">
         <span className="stat">{dirtyCount > 0 ? '本次改动 ' + dirtyCount + ' 处，将记入「待确认纠错」' : '还没有改动'}</span>
+        <button className="w-btn w-ghost" disabled={busy || rendering} onClick={() => void handleCancel()}>取消</button>
         <button className="w-btn w-ghost" disabled={busy || rendering} onClick={() => void save()}>{busy ? '保存中…' : '保存草稿'}</button>
         <button className="w-btn w-primary" disabled={busy || rendering} onClick={() => void confirmAndRender()}>{rendering ? '正在生成视频…' : '确认无误，生成视频'}</button>
       </div>

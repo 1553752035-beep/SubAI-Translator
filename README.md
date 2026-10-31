@@ -29,30 +29,35 @@ AI 视频字幕识别与翻译工具：自动提取视频里的语音或硬字�
 | Node.js 18+ | 仅运行桌面/网页界面时需要 |
 | NVIDIA GPU（可选） | 加速语音识别。**不需要安装 `torch`**：需同时满足「CTranslate2 支持 CUDA + 能找到 CUDA 运行库 + 空闲显存 ≥4GB」，详见「GPU 加速（可选）」 |
 
-## 下载安装（推荐）
-
-到 **[Releases](https://github.com/1553752035-beep/SubAI-Translator/releases)** 下载最新安装包：
-
-| 文件 | 说明 |
-|---|---|
-| `SubAI-Translator-Setup-<版本>-lite.exe` | 精简版安装包（**不含语音识别模型**，体积更小）|
-| `SubAI-Green-<版本>-lite.zip` | 免安装绿色版（同样不含模型）|
-
-1. 双击安装包 → 安装 → 从开始菜单启动，程序会自动拉起后端服务；
-2. 已安装的版本可在应用内「设置 → 版本与更新」一键检查并安装更新（更新包经签名校验）；
-3. 卸载时程序文件会被删除，但会**保留 `data\` 目录**（任务记录、术语库、翻译缓存），需要彻底清空请手动删除该目录。
-
-> **关于模型**：安装包为精简版，不含 `faster-whisper-small` 等模型（这是为了控制下载体积）。
-> 需要使用语音识别时，把模型目录放到应用安装目录下的 `models\` 中即可（目录结构见「目录结构」一节）。
-
+## 下载安装（推荐）
+
+到 **[Releases](https://github.com/1553752035-beep/SubAI-Translator/releases)** 下载最新安装包：
+
+| 文件 | 说明 |
+|---|---|
+| `SubAI-Translator-Setup-<版本>-lite.exe` | 精简版安装包（**不含语音识别模型**，体积更小）|
+| `SubAI-Green-<版本>-lite.zip` | 免安装绿色版（同样不含模型）|
+
+1. 双击安装包 → 安装 → 从开始菜单启动，程序会自动拉起后端服务；
+2. 已安装的版本可在应用内「设置 → 版本与更新」一键检查并安装更新（更新包经签名校验）；
+3. 卸载时程序文件会被删除，但会**保留 `data\` 目录**（任务记录、术语库、翻译缓存），需要彻底清空请手动删除该目录。
+
+> **关于模型**：安装包为精简版，不含 `faster-whisper-small` 等模型（这是为了控制下载体积）。
+> 需要使用语音识别时，把模型目录放到应用安装目录下的 `models\` 中即可（目录结构见「目录结构」一节）。
+
 ## 快速上手
 
 ### 第 1 步：启动后端
 
 ```powershell
 cd <安装目录>                      # 本机示例：D:\SubAI-Translator
-pip install -r requirements.txt   # 首次运行
+pip install -r requirements.txt   # 首次运行（版本上下界已锁定，见文件头）
 python src/start.py
+```
+
+> 需要与开发机完全一致的依赖树时，改用 `pip install -r requirements-lock.txt`。
+> lock 是本机 `pip freeze` 的全量快照（238 个精确版本），跨平台 / 跨 Python 版本可能装不上；
+> 因此**常规安装走 `requirements.txt`**，lock 只在排障或必须复现环境时使用。
 ```
 
 启动成功后：
@@ -106,6 +111,16 @@ cd frontend; npm run tauri:build -- --no-bundle; cd ..
 powershell -ExecutionPolicy Bypass -File tools\build_green_package.ps1 -OutDir D:\SubAI-Green
 ```
 
+> **两个安装包口径（2026-10-24 起）**：`tauri.conf.json` 的 `resources` 只含 `bin/`，
+> 所以 `npm run tauri:build` 产出的是 **lite 包（不含 ASR 模型，体积小）**；
+> 需要内置模型的完整包时用 `npm run tauri:build:full`（合并 `tauri.full.conf.json`）。
+> 两者的产物都带同名 `.sig` 签名——**手工改名/搬移安装包等于毁掉自动更新**，
+> v5.0.0 那次「新前端 + 旧后端混搭」就是这个环节出的问题。
+
+> **发布自动更新**：安装包上传后，用 `tools/make_latest_json.ps1` 生成 `latest.json`，
+> 放到 updater 指向的固定地址（`releases/latest/download/latest.json`）。
+> 脚本在缺 `.sig` 时会直接报错退出，不会生成一个"看起来正常"的更新文件。
+
 产物结构（约 0.75 GB）：`SubAI-Translator.exe` + `subai-backend.exe` + `bin/`（FFmpeg）+ `models/`（ASR 模型）+ `data/` + `使用说明.txt` + `LICENSE`。
 目录内所有路径都由 exe 位置推导，可**整体拷贝到其他机器**。
 
@@ -120,9 +135,29 @@ powershell -ExecutionPolicy Bypass -File tools\build_green_package.ps1 -OutDir D
 | 翻译服务 | 自行启动（如 koboldcpp），默认 `http://127.0.0.1:5001/v1/chat/completions` | 也可在设置页切换云端模式 |
 | CUDA 运行库（可选） | `<安装目录>/cuda_dlls/` | 仅在需要 GPU 加速语音识别时，见「GPU 加速（可选）」 |
 
+## 两种运行形态
+
+同一套代码支持两种形态，**默认是前者**：
+
+| 形态 | 默认 | 说明 |
+|---|---|---|
+| **本机免登录**（桌面工具） | ✅ | 不做登录。后端用只存在本机的令牌（`data/local_token.txt`）鉴权，Tauri 读入后注入 `X-Local-Token` 请求头；外部程序拿不到它，调不动后端 |
+| **账号 + 多用户**（云端部署） | 需显式开启 | 设 `SUBAI_AUTH_REQUIRE_LOGIN=true` 即恢复注册/登录/JWT/角色/配额/数据隔离。容器化（Docker / K8s）、开放平台按这条路线设计 |
+
+> 后端的用户体系、配额、监控、备份、容器化配置都还在可用，但**当前主线是本机免登录形态**；
+> 维护时不要把云端形态当成默认前提（例如界面里的「修改密码 / 运维」卡片已移除）。
+
 ## 配置说明
 
-通过环境变量或项目根目录的 `.env` 文件配置，环境变量优先级更高。常用配置项：
+配置来源按优先级从高到低：
+
+1. **真实环境变量**（`$env:SUBAI_LLM_CLOUD_API_KEY` 等）
+2. **`SUBAI_ENV_FILE`** 指向的文件（需要自定义位置时用）
+3. **用户级 `%APPDATA%/SubAI/.env`** —— **机密放这里**：程序在「设置」页保存的 Key 也写到这里，
+   它不在安装目录内，把整个程序目录拷给别人时不会被带走
+4. **安装目录 / 仓库根 `.env`** —— 只放与安装位置绑定、可公开的项（如模型目录）
+
+常用配置项：
 
 | 环境变量 | 说明 | 默认值 |
 |----------|------|--------|
@@ -168,6 +203,10 @@ powershell -ExecutionPolicy Bypass -File tools\build_green_package.ps1 -OutDir D
 
 ## 常见问题
 
+**成品视频放在哪？** 与源视频**同一目录**，命名形如 `原名_英语.mkv`（软字幕）或 `原名_英语.mp4`（硬字幕），
+重名时自动追加 `_1`、`_2`，**原视频永远不会被覆盖或改动**；字幕文件在 `output\` 目录。
+
+
 - **提示找不到模型**：将 faster-whisper 模型放到 `models/faster-whisper-small/` 目录
 - **提示 GPU 不可用**：需同时满足「CTranslate2 支持 CUDA + 能找到 CUDA DLL + 空闲显存 ≥4GB」，否则自动回退 CPU（属正常现象；判定依据见 `GET /api/system/asr-device`）
 - **云端翻译返回 401**：检查 `SUBAI_LLM_CLOUD_API_KEY` 是否已正确配置
@@ -191,9 +230,55 @@ npm test          # 单次运行
 npm run test:watch
 ```
 
-当前规模：后端 **272** 项、前端 **19** 项（随迭代增长）。端到端用例会真实调用 ASR / OCR / FFmpeg，缺少模型或 FFmpeg 时自动跳过。
+当前规模：后端 **508** 项、前端 **51** 项。端到端用例会真实调用 ASR / OCR / FFmpeg，缺少模型或 FFmpeg 时自动跳过。
+
+> **2026-10-24 实测基线**：Python 3.14.3 下 **508 passed / 0 failed**（全绿）。
+>
+> 如果你在别的机器上看到一批 `httpx.InvalidURL: Invalid port: ':1]'`，那不是代码问题——
+> 是宿主 `NO_PROXY` 里用了带方括号的 IPv6 写法（`[::1]`）。`tests/conftest.py` 已做归一化，
+> 详见 `docs/KNOWN-LIMITS.md` 第五节。
+
+本地一键跑（等同 CI 的检查项）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1
+```
 
 持续集成：`.github/workflows/ci.yml`（后端 pytest + 前端 vitest）。
+
+## 调研与决策记录
+
+- `docs/LESSONS.md` —— **调研方法论教训**。记录真实踩过的判断失误（用无信息量素材做对比、
+  没读对方文档就动手、参数没对齐就下结论等），每条写明「当时怎么想 / 错在哪 / 以后怎么做」。
+  评估第三方方案或做 A/B 对比前建议先看一遍。
+- `项目总方案.md`（仓库根目录，即 `D:\SubAI-Translator\项目总方案.md`）—— 唯一总方案文档，
+  含架构决策、路线规划与「同类项目调研」记录。
+- `docs/KNOWN-LIMITS.md` —— 已知限制。
+
+### 能力对照：本项目 vs 同类项目（SmartSub）
+
+按「能力面」逐项对齐后，主要差异与选择如下：
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 字幕导入 | srt / vtt / ass / lrc | 按扩展名 + 内容特征双判，改名也能认 |
+| 字幕导出 | srt / vtt / ass / lrc / txt | — |
+| ASS 全套样式 | ✅ | 颜色 / 描边 / 阴影 / 位置 / 背景框；脚本空间 384×288 保证零回归 |
+| 说话人分离 | ✅ | sherpa-onnx pyannote + 3dspeaker；按重叠时长贴附，不改动切分 |
+| 校对台波形 | ✅ | 只传像素桶 min/max，点击跳转 |
+| 崩溃隔离 | ✅ | pipeline 跑独立子进程，原生库崩溃不再拖垮整个后端 |
+| ASR 引擎 | 5 个 | whisper / sensevoice / paraformer / qwen3 / firered |
+| 翻译 provider | 27 个 | 25 个 OpenAI 兼容 + DeepL / Google 专用协议 |
+| 术语 / 词表 | ✅ | 两个库分工：词表纠 ASR 同音字，术语库纠翻译用词 |
+| 两段式确认 | ✅ | 先出字幕人工校对，再渲染成片 |
+
+**两处刻意不做**（评估后认为不值得，理由见 LESSONS）：
+
+- **音色克隆 / 声音转译**：实测效果「像电音」，达不到可用标准，已砍掉
+- **图片/漫画翻译**：与本项目「视频字幕」主线偏离，维护成本高于收益
+
+**一处待定**：FireRed-ASR（739MB）代码已支持（双版本签名），但模型未默认下载 ——
+其能力（中英 + 方言）大部分已被 Qwen3-ASR 覆盖，是否打包待定。
 
 ## GPU 加速（可选）
 

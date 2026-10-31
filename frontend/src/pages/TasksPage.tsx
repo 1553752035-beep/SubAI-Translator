@@ -4,6 +4,14 @@ import { MediaTools } from '../components/MediaTools';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import type { TaskRecord } from '../types';
 
+/** 秒 → mm:ss.d，用于未覆盖区间的时间码展示（与 SRT 时间语义一致、比 HH:MM:SS 短）。 */
+function fmtSec(sec: number): string {
+  const s = Math.max(0, Number(sec) || 0);
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  return m + ':' + (rest < 10 ? '0' : '') + rest.toFixed(1);
+}
+
 // 任务状态徽章
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
@@ -81,6 +89,64 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
               <strong>错误信息:</strong> {task.error_message}
             </div>
           )}
+          {/* [2026-10-25] 未覆盖区间提示。数据此前只写日志，用户看不到；
+              现在直接告诉用户「哪里没出字幕」，点击可复制时间码去核对。 */}
+          {task.metrics?.coverage && (
+            <div style={{ marginTop: 8, padding: 10, borderRadius: 6,
+                          background: task.metrics.coverage.warn ? '#fff8e1' : '#f5f5f5',
+                          border: '1px solid ' + (task.metrics.coverage.warn ? '#ffe0a3' : '#e0e0e0') }}>
+              <div>
+                <strong>语音覆盖：</strong>
+                {task.metrics.coverage.coverage_pct}%
+                （{task.metrics.coverage.covered} / {task.metrics.coverage.duration} 秒）
+                {task.metrics.coverage.warn && (
+                  <span style={{ color: '#e65100' }}>　⚠ 覆盖率偏低</span>
+                )}
+              </div>
+              {task.metrics.coverage.gaps.length > 0 && (
+                <>
+                  <div style={{ marginTop: 4 }}>
+                    <strong>未覆盖区间</strong>（≥{task.metrics.coverage.gap_min_sec} 秒，共
+                    {' '}{task.metrics.coverage.gaps.length} 处）：
+                  </div>
+                  <ul style={{ margin: '6px 0', paddingLeft: 20, maxHeight: 160, overflow: 'auto' }}>
+                    {task.metrics.coverage.gaps.map((g, i) => (
+                      <li key={i} style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                        {fmtSec(g.start)} – {fmtSec(g.end)}
+                        <span style={{ color: '#888' }}>（{g.sec.toFixed(1)} 秒）</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div style={{ fontSize: 12, color: '#666' }}>
+                    这些区间没有生成字幕。可能是本来没人说话（音效/换气），
+                    也可能是有人说话但没识别出来——可跳到对应时间点核对原片。
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {task.metrics?.diarization && (
+            <div style={{ marginBottom: '12px', padding: '10px 12px', borderRadius: 6,
+                          background: '#f5f5f5', border: '1px solid #e0e0e0' }}>
+              <strong>说话人分离</strong>
+              {' '}
+              <span style={{ fontSize: 13 }}>
+                共 <strong>{task.metrics.diarization.speaker_count}</strong> 人
+                （{task.metrics.diarization.segments} 段语音，
+                其中 {task.metrics.diarization.labeled} 行字幕已标注说话人
+                {task.metrics.diarization.unlabeled > 0 &&
+                  `，${task.metrics.diarization.unlabeled} 行未标注`}
+                ）
+              </span>
+              {task.metrics.diarization.speakers_in_rows !== undefined &&
+                task.metrics.diarization.speakers_in_rows <
+                  task.metrics.diarization.speaker_count && (
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    有说话人只出现在背景音里、没分到字幕行，所以字幕里的说话人数会更少。
+                  </div>
+                )}
+            </div>
+          )}
           {task.result_files && task.result_files.length > 0 && (
             <div>
               <strong>输出文件:</strong>
@@ -117,7 +183,7 @@ function TaskDetail({ task, onClose }: { task: TaskRecord; onClose: () => void }
 }
 
 // 任务列表页
-export function TasksPage() {
+export function TasksPage({ onEditTask }: { onEditTask?: (taskId: string) => void } = {}) {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<TaskRecord | null>(null);
@@ -357,6 +423,9 @@ export function TasksPage() {
                   <td>
                     <div className="row-actions">
                       <button className="btn" onClick={() => setSelectedTask(task)}>详情 / 字幕</button>
+                      {onEditTask && task.status === 'completed' && (
+                        <button className="btn" onClick={() => onEditTask(task.task_id)}>改字幕</button>
+                      )}
                       {(task.status === 'pending' || task.status === 'processing') && (
                         <button className="btn" onClick={() => void handleCancel(task.task_id)}>取消</button>
                       )}
