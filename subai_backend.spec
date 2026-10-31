@@ -41,7 +41,14 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["torch", "torchvision", "torchaudio", "pytest", "pip", "setuptools", "tkinter"],
+    excludes=[
+        "torch", "torchvision", "torchaudio", "pytest", "pip", "setuptools", "tkinter",
+        # 本机全局 Python 里存在、但本项目完全用不到的重包；不排除时 onefile 会从
+        # 约 216MB 膨胀到约 395MB（collect_all 顺着依赖链把它们一并收了进来）。
+        "transformers", "kubernetes", "bitsandbytes", "sklearn", "pandas", "pyarrow",
+        "modelscope", "llvmlite", "sympy", "chromadb", "chromadb_rust_bindings",
+        "matplotlib", "IPython", "tensorboard", "datasets", "accelerate", "peft",
+    ],
     noarchive=False,
 )
 

@@ -64,7 +64,8 @@ class TaskRecord:
         completed_at: Optional[float] = None,
         error_message: Optional[str] = None,
         user_id: Optional[str] = None,
-        metrics: Optional[dict] = None
+        metrics: Optional[dict] = None,
+        context: Optional[dict] = None
     ):
         self.task_id = task_id
         self.video_path = video_path
@@ -84,6 +85,8 @@ class TaskRecord:
         self.user_id = user_id
         # 四期 4.6：任务指标（翻译行数/术语命中/缓存命中/失败行/请求数等）
         self.metrics = metrics or {}
+        # 五期：翻译前的视频语境摘要（确认页可见，便于排查"摘要错误污染译文"）
+        self.context = context or {}
     
     def to_dict(self) -> dict:
         """转换为字典（用于API响应）"""
@@ -104,7 +107,8 @@ class TaskRecord:
             "completed_at": datetime.fromtimestamp(self.completed_at).isoformat() if self.completed_at else None,
             "error_message": self.error_message,
             "user_id": self.user_id,
-            "metrics": self.metrics
+            "metrics": self.metrics,
+            "context": self.context
         }
 
 
@@ -168,6 +172,9 @@ class TaskManager:
         # 迁移：旧库无 metrics 列时补齐（四期 4.6 数据分析）
         if "metrics" not in columns:
             await self._db.execute("ALTER TABLE tasks ADD COLUMN metrics TEXT DEFAULT '{}'")
+        # 迁移：旧库无 context 列时补齐（五期·语境摘要）
+        if "context" not in columns:
+            await self._db.execute("ALTER TABLE tasks ADD COLUMN context TEXT DEFAULT '{}'")
         
         # 创建索引（加速查询）
         await self._db.execute("""
@@ -250,13 +257,14 @@ class TaskManager:
         await self._db.execute(
             """INSERT INTO tasks 
                (task_id, video_path, mode, source_lang, target_lang, output_format, 
-                terms_file, status, progress, message, created_at, updated_at, user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                terms_file, status, progress, message, created_at, updated_at, user_id, context)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.task_id, record.video_path, record.mode, record.source_lang,
                 record.target_lang, record.output_format, record.terms_file,
                 record.status, record.progress, record.message,
-                record.created_at, record.updated_at, record.user_id
+                record.created_at, record.updated_at, record.user_id,
+                json.dumps(record.context or {}, ensure_ascii=False)
             )
         )
         await self._db.commit()
@@ -297,7 +305,8 @@ class TaskManager:
         message: Optional[str] = None,
         result_files: Optional[list[str]] = None,
         error_message: Optional[str] = None,
-        metrics: Optional[dict] = None
+        metrics: Optional[dict] = None,
+        context: Optional[dict] = None
     ) -> Optional[TaskRecord]:
         """
         更新任务状态
@@ -334,6 +343,9 @@ class TaskManager:
         if metrics is not None:
             set_clauses.append("metrics = ?")
             values.append(json.dumps(metrics, ensure_ascii=False))
+        if context is not None:
+            set_clauses.append("context = ?")
+            values.append(json.dumps(context, ensure_ascii=False))
 
         if result_files is not None:
             set_clauses.append("result_files = ?")
@@ -495,7 +507,8 @@ class TaskManager:
             completed_at=row["completed_at"],
             error_message=row["error_message"],
             user_id=row["user_id"] if "user_id" in row.keys() else None,
-            metrics=_parse_metrics(row["metrics"]) if "metrics" in row.keys() else None
+            metrics=_parse_metrics(row["metrics"]) if "metrics" in row.keys() else None,
+            context=_parse_metrics(row["context"]) if "context" in row.keys() else None
         )
 
 

@@ -2,7 +2,6 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { WizardPage } from './pages/WizardPage';
 import { SimpleSubtitleEditor } from './pages/SimpleSubtitleEditor';
 import { applyTheme, getSavedTheme, saveTheme, systemTheme, type Theme } from './theme';
-import { TaskProgress } from './components/TaskProgress';
 import { TasksPage } from './pages/TasksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HelpPage } from './pages/HelpPage';
@@ -60,7 +59,11 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(() => getSavedTheme() ?? systemTheme());
   // 五期：高级功能默认收起来，主界面只留三段式向导
   const [navOpen, setNavOpen] = useState(false);
-  const [confirmTask, setConfirmTask] = useState<string | null>(null);
+  // 视图栈：主界面 / 确认页（第二级页面）。取代原来的 confirmTask 布尔态
+  const [appView, setAppView] = useState<'main' | 'confirm'>('main');
+  const [confirmFrom, setConfirmFrom] = useState<'wizard' | 'tasks'>('wizard');
+  // 强制重建向导页：从确认页返回时重置向导状态，避免残留导致重复渲染
+  const [wizardKey, setWizardKey] = useState(0);
   const [user, setUser] = useState<UserInfo | null>(null);
   // 后端是否要求账号登录（默认否 = 免登录模式）
   const [requireLogin, setRequireLogin] = useState(false);
@@ -77,6 +80,20 @@ export default function App() {
     const next: Theme = theme === 'light' ? 'dark' : 'light';
     saveTheme(next);
     setTheme(next);
+  };
+
+  // ---- 视图栈导航：确认页是明确的第二级页面 ----
+  const navigateToConfirm = (id: string, from: 'wizard' | 'tasks' = 'wizard') => {
+    setActiveTaskId(id);
+    setConfirmFrom(from);
+    setAppView('confirm');
+  };
+  // 返回主界面必须三重清理，否则主界面会把编辑器再渲染一次（历史 bug）
+  const navigateBackToMain = () => {
+    setAppView('main');
+    setActiveTaskId(null);
+    if (confirmFrom === 'tasks') setActiveTab('tasks');   // 从任务列表来：原路返回
+    else setWizardKey((k) => k + 1);                      // 从向导来：重置向导
   };
   const [queue, setQueue] = useState({ running: 0, waiting: 0 });
   const [backendOk, setBackendOk] = useState(false);
@@ -278,11 +295,15 @@ export default function App() {
   }
 
   // 五期：确认页作为独立整页显示（不在向导页下方挤着）
-  if (confirmTask) {
+  if (appView === 'confirm' && activeTaskId) {
     return (
       <div className="w-app">
         <div className="w-conf-wrap">
-          <SimpleSubtitleEditor taskId={confirmTask} onClose={() => setConfirmTask(null)} />
+          <SimpleSubtitleEditor
+            taskId={activeTaskId}
+            breadcrumb={confirmFrom === 'tasks' ? ['主界面', '任务列表', '确认字幕'] : ['主界面', '新建任务', '确认字幕']}
+            onClose={navigateBackToMain}
+          />
         </div>
       </div>
     );
@@ -350,24 +371,15 @@ export default function App() {
             </div>
           )}
           {activeTab === 'home' && (
-            <>
-              <WizardPage
-                onEditTask={(id) => { setActiveTaskId(id); setConfirmTask(id); }}
-                theme={theme}
-                onToggleTheme={toggleTheme}
-                onOpenAdvanced={() => setNavOpen((v) => !v)}
-              />
-              {activeTaskId && (
-                <>
-                  <TaskProgress taskId={activeTaskId} />
-                  <div id="sub-editor">
-                    <SimpleSubtitleEditor taskId={activeTaskId} />
-                  </div>
-                </>
-              )}
-            </>
+            <WizardPage
+              key={wizardKey}
+              onEditTask={(id) => navigateToConfirm(id, 'wizard')}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              onOpenAdvanced={() => setNavOpen((v) => !v)}
+            />
           )}
-          {activeTab === 'tasks' && <TasksPage />}
+          {activeTab === 'tasks' && <TasksPage onEditTask={(id) => navigateToConfirm(id, 'tasks')} />}
           {activeTab === 'terms' && (
             <>
               <div className="page-head">

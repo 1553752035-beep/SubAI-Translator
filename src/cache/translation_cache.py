@@ -121,19 +121,30 @@ class TranslationCache:
         self._db = await aiosqlite.connect(self.db_path)
         self._db.row_factory = aiosqlite.Row
         
-        # 创建缓存表
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS translation_cache (
+        # 创建缓存表（五期·语境摘要：key 增加 context_key，同一句在不同语境下可共存）
+        _create_sql = """
+            CREATE TABLE translation_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 text TEXT NOT NULL,
                 target_lang TEXT NOT NULL,
+                context_key TEXT NOT NULL DEFAULT '',
                 translation TEXT NOT NULL,
                 created_at REAL NOT NULL,
                 accessed_at REAL NOT NULL,
                 access_count INTEGER DEFAULT 1,
-                UNIQUE(text, target_lang)
+                UNIQUE(text, target_lang, context_key)
             )
-        """)
+        """
+        await self._db.execute(_create_sql.replace("CREATE TABLE translation_cache", "CREATE TABLE IF NOT EXISTS translation_cache"))
+
+        # 迁移：旧表没有 context_key 列（UNIQUE 约束也不同）。缓存是可再生数据，
+        # 直接重建——旧 key 语义已变，保留的记录也命中不到。
+        _cur = await self._db.execute("PRAGMA table_info(translation_cache)")
+        _cols = [row[1] for row in await _cur.fetchall()]
+        if "context_key" not in _cols:
+            await self._db.execute("DROP TABLE translation_cache")
+            await self._db.execute(_create_sql)
+            await self._db.execute("CREATE INDEX IF NOT EXISTS idx_cache_text_lang ON translation_cache(text, target_lang)")
         
         # 创建索引
         await self._db.execute("""
@@ -161,7 +172,7 @@ class TranslationCache:
     # 缓存操作
     # ----------------------------------------------------------------------- #
     
-    async def get(self, text: str, target_lang: str) -> Optional[str]:
+    async def get(self, text: str, target_lang: str, context_key: str = "") -> Optional[str]:
         """
         查询缓存
         
@@ -178,8 +189,8 @@ class TranslationCache:
         # 查询缓存
         cursor = await self._db.execute(
             """SELECT * FROM translation_cache 
-               WHERE text = ? AND target_lang = ?""",
-            (text, target_lang)
+               WHERE text = ? AND target_lang = ? AND context_key = ?""",
+            (text, target_lang, context_key or "")
         )
         row = await cursor.fetchone()
         
@@ -220,7 +231,8 @@ class TranslationCache:
         self,
         text: str,
         target_lang: str,
-        translation: str
+        translation: str,
+        context_key: str = ""
     ) -> None:
         """
         写入缓存
@@ -239,22 +251,22 @@ class TranslationCache:
             # 插入或更新（UPERT）
             await self._db.execute(
                 """INSERT INTO translation_cache 
-                   (text, target_lang, translation, created_at, accessed_at, access_count)
-                   VALUES (?, ?, ?, ?, ?, 1)
-                   ON CONFLICT(text, target_lang) 
+                   (text, target_lang, context_key, translation, created_at, accessed_at, access_count)
+                   VALUES (?, ?, ?, ?, ?, ?, 1)
+                   ON CONFLICT(text, target_lang, context_key) 
                    DO UPDATE SET 
                        translation = excluded.translation,
                        accessed_at = excluded.accessed_at,
                        access_count = access_count + 1""",
-                (text, target_lang, translation, now, now)
+                (text, target_lang, context_key or "", translation, now, now)
             )
         except Exception:
             # 如果UPERT失败，尝试更新
             await self._db.execute(
                 """UPDATE translation_cache 
                    SET translation = ?, accessed_at = ?, access_count = access_count + 1
-                   WHERE text = ? AND target_lang = ?""",
-                (translation, now, text, target_lang)
+                   WHERE text = ? AND target_lang = ? AND context_key = ?""",
+                (translation, now, text, target_lang, context_key or "")
             )
         
         await self._db.commit()

@@ -109,7 +109,13 @@ MODEL_FILES = ["model.bin", "config.json", "tokenizer.json"]
 
 def check_models(out: list) -> None:
     from src.config import config
-    d = config.models_dir
+    # 五期：跟随 SUBAI_ASR_MODEL_DIR（与 pipeline 实际使用的目录保持一致），
+    # 否则用户切到 turbo 后自检会说「没模型」
+    try:
+        from src import pipeline as _pl
+        d = _pl.MODEL_DIR
+    except Exception:  # noqa: BLE001
+        d = config.models_dir
     if not os.path.isdir(d):
         # 依次在 <root>/models、以及安装根的上层 models 里找现成的模型目录：
         # 源码方式运行时，安装根常常是仓库目录，而模型放在仓库的上一级。

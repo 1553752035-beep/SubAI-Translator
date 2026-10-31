@@ -1,4 +1,4 @@
-# Download a CTranslate2 Whisper model from the hf-mirror endpoint.
+﻿# Download a CTranslate2 Whisper model from the hf-mirror endpoint.
 #
 # WHY curl AND NOT huggingface_hub:
 #   This machine's link stalls on long sustained transfers (observed three
@@ -8,9 +8,16 @@
 #   transfer and lets --retry reconnect from where it stopped. This turns an
 #   otherwise impossible download into a merely slow one.
 param(
-  [string]$Repo   = 'Systran/faster-whisper-small',
+  [string]$Model  = 'small',   # small | turbo（turbo 体积 1.6GB，识别更准且 CPU 更快）
+  [string]$Repo   = '',
   [string]$OutDir = ''
 )
+$modelMap = @{
+  'small' = @{ Repo = 'Systran/faster-whisper-small'; Dir = 'faster-whisper-small' }
+  'turbo' = @{ Repo = 'dropbox-dash/faster-whisper-large-v3-turbo'; Dir = 'faster-whisper-large-v3-turbo' }
+}
+if (-not $modelMap.ContainsKey($Model)) { Write-Host "未知模型: $Model（支持 small / turbo）"; exit 1 }
+if (-not $Repo) { $Repo = $modelMap[$Model].Repo }
 
 # Derive paths from this script's location. Two layouts are supported:
 #   source repo   : <root>/<repo>/tools/fetch_ct2_model.ps1  (repo has requirements.txt)
@@ -21,7 +28,16 @@ if (Test-Path (Join-Path $parent 'requirements.txt')) {
 } else {
   $installRoot = $parent
 }
-if (-not $OutDir) { $OutDir = Join-Path $installRoot 'models\faster-whisper-small' }
+if (-not $OutDir) {
+  if ($Model -eq 'turbo') {
+    # 刻意不默认放进 models/：那是 Tauri 的 resources，会把 1.6GB 打进安装包。
+    # 开发者本机测试用 tools/models-turbo；用户首启引导下载时由调用方显式传 -OutDir
+    # （用户可写目录），并把路径写进 SUBAI_ASR_MODEL_DIR。
+    $OutDir = Join-Path $installRoot 'tools\models-turbo'
+  } else {
+    $OutDir = Join-Path $installRoot ('models\' + $modelMap[$Model].Dir)
+  }
+}
 $logDir = Join-Path $installRoot 'logs'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
