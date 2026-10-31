@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubAI Translator —— 界面原型 v1</title>
+<style>
+:root{--bg:#11111b;--card:#1b1b28;--card2:#222233;--line:#2e2e42;--text:#e9e9f2;--dim:#9a9ab0;--accent:#7c6cff;--accent2:#4a8bff;--ok:#39d98a;--warn:#ffb84d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.6}
+.app{max-width:940px;margin:0 auto;padding:22px 22px 60px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:26px}
+.brand{font-size:17px;font-weight:600;letter-spacing:.3px}
+.brand span{color:var(--accent)}
+button{font-family:inherit;font-size:14px;cursor:pointer;border:0;border-radius:10px;padding:10px 16px;transition:.15s}
+.ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
+.ghost:hover{color:var(--text);border-color:#3d3d58}
+.primary{background:var(--accent);color:#fff;padding:13px 30px;font-size:15px;font-weight:600}
+.primary:hover{background:#6a5cf0}
+.primary:disabled{background:#33334a;color:#7b7b95;cursor:not-allowed}
+h1{font-size:26px;margin:0 0 8px}
+h2{font-size:20px;margin:0 0 6px}
+.sub{color:var(--dim);font-size:14px;margin-bottom:26px}
+.screen{display:none}.screen.active{display:block;animation:fade .22s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.drop{border:2px dashed #3a3a55;border-radius:18px;padding:64px 24px;text-align:center;cursor:pointer;transition:.18s;background:linear-gradient(180deg,#191926,#16161f)}
+.drop:hover{border-color:var(--accent);background:#1c1c2c}
+.drop .big{font-size:40px;margin-bottom:10px}
+.drop .t{font-size:17px;font-weight:600;margin-bottom:4px}
+.drop .d{color:var(--dim);font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 18px;cursor:pointer;transition:.16s}
+.card:hover{border-color:var(--accent);transform:translateY(-2px);background:var(--card2)}
+.card .ico{font-size:26px;margin-bottom:10px}
+.card .t{font-size:16px;font-weight:600;margin-bottom:6px}
+.card .d{color:var(--dim);font-size:13px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-top:18px}
+.row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #23233a}
+.row:last-child{border-bottom:0}
+.row .k{font-size:14px}
+.row .h{color:var(--dim);font-size:12px;margin-top:2px}
+select,input[type=text],textarea{background:#141420;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-family:inherit;font-size:14px;outline:none}
+select:focus,textarea:focus,input:focus{border-color:var(--accent)}
+textarea{width:100%;min-height:170px;resize:vertical;line-height:1.8}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{background:#141420;border:1px solid var(--line);border-radius:20px;padding:7px 15px;font-size:13px;color:var(--dim);cursor:pointer}
+.chip.on{border-color:var(--accent);color:#fff;background:#2a2450}
+.fileline{margin-top:12px;color:var(--dim);font-size:13px}
+.bar{height:8px;background:#22223a;border-radius:99px;overflow:hidden;margin:14px 0 10px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
+.steps{color:var(--dim);font-size:13px}
+.done-big{font-size:44px;text-align:center;margin:6px 0 2px}
+.out{background:#141420;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14px;margin:16px 0;word-break:break-all}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.player{background:#000;border-radius:12px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:#55556e;font-size:13px;position:relative;overflow:hidden}
+.player .ctrl{position:absolute;left:14px;right:14px;bottom:12px;display:flex;align-items:center;gap:10px;color:#bbb}
+.player .ctrl .p{background:#fff2;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+.subs{margin-top:14px}
+.sub-row{display:flex;gap:12px;align-items:flex-start;padding:9px 10px;border-radius:9px;cursor:pointer}
+.sub-row:hover{background:#1e1e30}
+.sub-row .tm{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums;padding-top:3px;min-width:104px}
+.sub-row .tx{flex:1;font-size:14px}
+.sub-row input{width:100%}
+.drawer{position:fixed;top:0;right:-360px;width:340px;height:100%;background:#16161f;border-left:1px solid var(--line);padding:24px;transition:right .22s ease;z-index:20}
+.drawer.open{right:0}
+.drawer h3{margin:0 0 4px;font-size:16px}
+.drawer .n{color:var(--dim);font-size:12px;margin-bottom:18px}
+.drawer .item{padding:13px 0;border-bottom:1px solid #23233a;cursor:pointer}
+.drawer .item:hover .t{color:var(--accent)}
+.drawer .item .t{font-size:14px;font-weight:500}
+.drawer .item .d{color:var(--dim);font-size:12px}
+.toast{position:fixed;left:50%;bottom:34px;transform:translate(-50%,20px);background:#2a2a44;border:1px solid #3d3d5c;color:#fff;padding:11px 20px;border-radius:10px;font-size:14px;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.foot{margin-top:34px;color:#5c5c74;font-size:12px;text-align:center}
+.back{background:transparent;color:var(--dim);padding:6px 0;font-size:13px}
+.back:hover{color:var(--text)}
+@media(max-width:720px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">SubAI <span>Translator</span></div>
+    <button class="ghost" onclick="toggleAdv()">高级</button>
+  </div>
+
+  <section id="s1" class="screen active">
+    <h1>给视频加字幕</h1>
+    <div class="sub">选一个视频，剩下的交给我。原文件不会被改动。</div>
+    <label class="drop" for="pick">
+      <div class="big">🎬</div>
+      <div class="t">把视频拖进来，或点击选择</div>
+      <div class="d">支持 mp4 / mkv / mov / avi / flv / webm</div>
+    </label>
+    <input id="pick" type="file" accept="video/*" style="display:none" onchange="picked(this)">
+    <div id="pickedName" class="fileline"></div>
+  </section>
+
+  <section id="s2" class="screen">
+    <button class="back" onclick="show(1)">← 换个视频</button>
+    <h2 style="margin-top:10px">这个视频，你想怎么处理？</h2>
+    <div class="sub">选一个就行，后面可以改。</div>
+    <div class="cards">
+      <div class="card" onclick="go(3)"><div class="ico">🌏</div><div class="t">翻译</div><div class="d">识别说话或画面字幕，翻译成别的语言，直接出成品</div></div>
+      <div class="card" onclick="go(4)"><div class="ico">💬</div><div class="t">只加字幕，不翻译</div><div class="d">自动识别原文；或者用我已有的字幕文件</div></div>
+      <div class="card" onclick="go(5)"><div class="ico">✍️</div><div class="t">我有文字稿</div><div class="d">把台词粘进去，自动对齐时间轴</div></div>
+    </div>
+  </section>
+
+  <section id="s3" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">翻译设置</h2>
+    <div class="sub" id="srcInfo">识别语言：自动判断</div>
+    <div class="panel">
+      <div class="row"><div><div class="k">翻译成</div><div class="h">最常用的几种放前面</div></div>
+        <select id="toLang"><option>中文</option><option>English</option><option>日本語</option><option>한국어</option><option>Русский</option></select></div>
+      <div class="row"><div><div class="k">成品形式</div><div class="h" id="fmtHint">软字幕：快，播放器里字幕可开关</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this,'fmt')">软字幕 MKV</span><span class="chip" onclick="pickChip(this,'fmt')">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this,'fmt')">两个都要</span></div></div>
+      <div class="row"><div><div class="k">识别来源</div><div class="h">说话声，还是画面里的字幕</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this,'src')">说话声</span><span class="chip" onclick="pickChip(this,'src')">画面字幕 OCR</span></div></div>
+    </div>
+    <div style="margin-top:20px;text-align:center"><button class="primary" onclick="start('识别 → 翻译 → 压制')">开始</button></div>
+  </section>
+
+  <section id="s4" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">只加字幕（不翻译）</h2>
+    <div class="sub">适合游戏集锦、Vlog、教程。</div>
+    <div class="panel">
+      <div class="row"><div><div class="k">字幕从哪来</div><div class="h">没有字幕文件就自动识别</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this,'from')">自动识别说话声</span><span class="chip" onclick="pickChip(this,'from')">我已有字幕文件</span></div></div>
+      <div class="row"><div><div class="k">去背景音</div><div class="h">音乐太吵时打开，识别更准（慢一些）</div></div>
+        <div class="chips"><span class="chip" onclick="pickChip(this,'denoise')">关</span><span class="chip" onclick="pickChip(this,'denoise')">开</span></div></div>
+      <div class="row"><div><div class="k">成品形式</div><div class="h">软字幕：快，播放器里字幕可开关</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this,'fmt2')">软字幕 MKV</span><span class="chip" onclick="pickChip(this,'fmt2')">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this,'fmt2')">两个都要</span></div></div>
+    </div>
+    <div style="margin-top:20px;text-align:center"><button class="primary" onclick="start('识别原文 → 加字幕 → 压制')">开始</button></div>
+  </section>
+
+  <section id="s5" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">我有文字稿</h2>
+    <div class="sub">一行一句，直接粘进来。我会自动把每句话对上时间轴，你不用管时间。</div>
+    <div class="panel">
+      <textarea id="script">兄弟们这波看我操作
+别急，等他先动
+好，他要跳了
+就是现在，压枪
+三杀，直接带走</textarea>
+      <div class="row"><div><div class="k">成品形式</div><div class="h">软字幕：快，播放器里字幕可开关</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this,'fmt3')">软字幕 MKV</span><span class="chip" onclick="pickChip(this,'fmt3')">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this,'fmt3')">两个都要</span></div></div>
+    </div>
+    <div style="margin-top:20px;text-align:center"><button class="primary" onclick="start('对齐时间轴 → 压制')">开始</button></div>
+  </section>
+
+  <section id="s6" class="screen">
+    <h2>正在处理…</h2>
+    <div class="sub" id="runName">精彩操作集锦.mp4</div>
+    <div class="panel" style="text-align:center">
+      <div class="bar"><i id="barIn"></i></div>
+      <div class="steps" id="stepText">准备中…</div>
+      <div style="margin-top:22px"><button class="ghost" onclick="show(2)">取消</button></div>
+    </div>
+  </section>
+
+  <section id="s7" class="screen">
+    <div class="done-big">✅</div>
+    <h2 style="text-align:center">好了！</h2>
+    <div class="sub" style="text-align:center">原视频没动过，成品是另一个文件。</div>
+    <div class="out" id="outFile">精彩操作集锦_中文字幕.mkv</div>
+    <div class="actions" style="justify-content:center">
+      <button class="primary" onclick="toast('（原型示意）已打开文件夹')">打开文件夹</button>
+      <button class="ghost" onclick="toast('（原型示意）用系统播放器打开')">播放</button>
+      <button class="ghost" onclick="go(8)">改字幕</button>
+      <button class="ghost" onclick="show(1)">再做一个</button>
+    </div>
+  </section>
+
+  <section id="s8" class="screen">
+    <button class="back" onclick="show(7)">← 返回</button>
+    <h2 style="margin-top:10px">改字幕</h2>
+    <div class="sub">点哪一行就改哪一行；只改文字，时间不用管。改完点右下角重新出片。</div>
+    <div class="player">播放器预览（原型示意）
+      <div class="ctrl"><span class="p">▶</span><span style="flex:1;height:4px;background:#33334a;border-radius:9px"></span><span style="font-size:12px">00:12 / 03:40</span></div>
+    </div>
+    <div class="subs" id="subList"></div>
+    <div style="margin-top:18px;text-align:center"><button class="primary" onclick="toast('已保存，正在重新出片…')">保存并重新出片</button></div>
+  </section>
+
+  <div class="foot">这是界面原型：所有功能都是演示，不会真的处理视频。想改哪里直接跟他说。</div>
+</div>
+
+<div class="drawer" id="adv">
+  <h3>高级功能</h3>
+  <div class="n">平时用不到，都收在这里</div>
+  <div class="item" onclick="toast('术语库（原型示意）')"><div class="t">术语库</div><div class="d">人名、游戏名词固定译法</div></div>
+  <div class="item" onclick="toast('插件（原型示意）')"><div class="t">插件</div><div class="d">换翻译模型、OCR、配音</div></div>
+  <div class="item" onclick="toast('API 开放平台（原型示意）')"><div class="t">API / 开放平台</div><div class="d">给别的程序调用</div></div>
+  <div class="item" onclick="toast('报表（原型示意）')"><div class="t">使用报表</div><div class="d">做了多少、成功率</div></div>
+  <div class="item" onclick="toast('设置（原型示意）')"><div class="t">设置</div><div class="d">翻译服务、显卡、输出目录</div></div>
+  <div class="item" onclick="toast('帮助（原型示意）')"><div class="t">使用帮助</div><div class="d">常见问题</div></div>
+  <div style="margin-top:18px"><button class="ghost" onclick="toggleAdv()">收起</button></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var fname = "精彩操作集锦.mp4";
+var subs = ["兄弟们这波看我操作","别急，等他先动","好，他要跳了","就是现在，压枪","三杀，直接带走","这波不亏","走位躲一下","唉，差一点点","稳住，别急","下一把继续"];
+function show(n){var el=document.querySelectorAll(".screen");for(var i=0;i<el.length;i++){el[i].classList.remove("active")}document.getElementById("s"+n).classList.add("active");window.scrollTo(0,0);document.getElementById("adv").classList.remove("open")}
+function go(n){if(n===8){buildSubs()}if(n===7){document.getElementById("outFile").textContent=fname.replace(/\.[^.]+$/,"")+"_中文字幕.mkv"}show(n)}
+function picked(input){var f=input.files&&input.files[0];if(f){fname=f.name}document.getElementById("pickedName").textContent="已选择："+fname;setTimeout(function(){show(2)},220)}
+function pickChip(el,group){var p=el.parentNode;for(var i=0;i<p.children.length;i++){p.children[i].classList.remove("on")}el.classList.add("on");if(group==="fmt"||group==="fmt2"||group==="fmt3"){var hint=document.getElementById("fmtHint");var t=el.textContent;if(hint){hint.textContent=t.indexOf("硬字幕")===0?"硬字幕：字幕烧进画面，任何设备都能看，但要重编码、慢一些":(t.indexOf("两个")===0?"两种都出：多花一份压制时间":"软字幕：快，播放器里字幕可开关")}}}
+function start(what){show(6);document.getElementById("runName").textContent=fname+"   ·   "+what;var steps=["识别语音…","翻译…","生成字幕…","压制视频…"];var p=0;var bar=document.getElementById("barIn");var txt=document.getElementById("stepText");var t=setInterval(function(){p+=6;if(p>100){p=100}bar.style.width=p+"%";var idx=Math.min(steps.length-1,Math.floor(p/26));txt.textContent=steps[idx];if(p>=100){clearInterval(t);setTimeout(function(){go(7)},450)}},160)}
+function buildSubs(){var box=document.getElementById("subList");if(box.childElementCount)return;for(var i=0;i<subs.length;i++){(function(n){var d=document.createElement("div");d.className="sub-row";var tm=document.createElement("div");tm.className="tm";var s=n*4+1;tm.textContent="00:"+(s<10?"0":"")+s+" → 00:"+(s+3<10?"0":"")+(s+3);var tx=document.createElement("div");tx.className="tx";tx.textContent=subs[n];d.appendChild(tm);d.appendChild(tx);d.onclick=function(){edit(d,tx,n)};box.appendChild(d)})(i)}}
+function edit(row,tx,n){if(row.querySelector("input"))return;var v=tx.textContent;tx.textContent="";var inp=document.createElement("input");inp.type="text";inp.value=v;tx.appendChild(inp);inp.focus();inp.select();function done(){subs[n]=inp.value||v;tx.textContent=subs[n]}inp.onblur=done;inp.onkeydown=function(e){if(e.key==="Enter"){done()}}}
+function toggleAdv(){document.getElementById("adv").classList.toggle("open")}
+var tt;function toast(msg){var el=document.getElementById("toast");el.textContent=msg;el.classList.add("show");clearTimeout(tt);tt=setTimeout(function(){el.classList.remove("show")},1800)}
+</script>
+</body>
+</html>

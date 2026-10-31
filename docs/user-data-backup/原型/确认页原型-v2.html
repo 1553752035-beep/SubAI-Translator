@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubAI 确认页原型 v2</title>
+<style>
+html.light{--bg:#f5f6fa;--card:#fff;--line:#e8ebf3;--line2:#c9d0e0;--text:#1b1e28;--dim:#565d6d;--accent:#5b4be0;--soft:rgba(91,75,224,.10);--warn:#8a5a00;--warnbar:#f0b429;--warnbg:#fff8e6;--ok:#059669;--input:#fff;--shadow:0 1px 2px rgba(16,24,40,.06)}
+html.dark{--bg:#0e0f13;--card:#16181f;--line:#262a36;--line2:#3a4155;--text:#eceef5;--dim:#9aa0b4;--accent:#8f84ff;--soft:rgba(143,132,255,.16);--warn:#e2b04a;--warnbar:#e2b04a;--warnbg:rgba(226,176,74,.10);--ok:#39d98a;--input:#101219;--shadow:none}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:18px 22px 30px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.brand{font-size:16px;font-weight:600}
+.brand i{font-style:normal;color:var(--accent)}
+.btn{font-family:inherit;font-size:14px;cursor:pointer;border-radius:10px;padding:9px 15px;background:var(--card);color:var(--text);border:1px solid var(--line2)}
+.btn:hover{border-color:var(--accent)}
+.primary{background:var(--accent);color:#fff;border:1px solid transparent;padding:12px 26px;font-weight:600}
+.primary:hover{filter:brightness(1.08)}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.player{background:#000;border-radius:12px;aspect-ratio:16/9;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.player .ph{color:#8892a6;font-size:13px;text-align:center}
+.play{position:absolute;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.play svg{width:22px;height:22px;color:#fff;margin-left:3px}
+.cap{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#fff;font-size:19px;text-shadow:0 1px 4px rgba(0,0,0,.9);padding:0 20px}
+.bar{height:8px;background:var(--line);border-radius:99px;margin-top:14px;position:relative}
+.bar .seg{position:absolute;top:0;bottom:0;background:var(--soft);border-radius:2px}
+.bar .dot{position:absolute;top:1px;width:6px;height:6px;border-radius:50%;background:var(--warnbar);cursor:pointer;border:1px solid var(--card)}
+.bar .dot:hover{transform:scale(1.5)}
+.bar .head{position:absolute;top:-4px;width:2px;height:16px;background:var(--accent);border-radius:2px}
+.legend{display:flex;gap:14px;color:var(--dim);font-size:12px;margin-top:8px;align-items:center}
+.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warnbar);margin-right:4px;vertical-align:1px}
+.legend s{display:inline-block;width:14px;height:6px;border-radius:2px;background:var(--soft);margin-right:4px}
+.fix{background:var(--soft);border:1px solid var(--line2);border-radius:10px;padding:9px 12px;font-size:13px;margin-top:14px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.fix b{color:var(--accent)}
+.fix a{color:var(--accent);cursor:pointer;text-decoration:none;white-space:nowrap}
+.tip{color:var(--dim);font-size:12.5px;margin-top:12px}
+.q{display:inline-flex;width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);color:var(--dim);font-size:11px;align-items:center;justify-content:center;margin-left:4px;cursor:help}
+.list{max-height:520px;overflow:auto;padding:6px 8px;position:relative}
+.row{display:flex;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer;align-items:flex-start;border-left:2px solid transparent}
+.row:hover{background:var(--bg)}
+.row.on{background:var(--soft)}
+.row.warn{background:var(--warnbg);border-left-color:var(--warnbar)}
+.row.fixed{background:var(--soft);border-left-color:var(--accent)}
+.t{color:var(--dim);font-size:11.5px;min-width:92px;padding-top:3px;font-variant-numeric:tabular-nums}
+.txt{flex:1;font-size:14.5px}
+.txt u{cursor:pointer}
+.tag{font-size:11px;color:var(--warn);border:1px solid var(--warnbar);border-radius:20px;padding:0 7px;margin-left:6px}
+.tag.fix{background:transparent;border-color:transparent;color:var(--accent);display:inline}
+.pop{position:absolute;width:284px;background:var(--card);border:1px solid var(--line2);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.26);padding:13px;z-index:20}
+.pop h4{margin:0 0 4px;font-size:14px}
+.pop p{margin:0 0 9px;color:var(--dim);font-size:12.5px}
+.pop input{width:100%;background:var(--input);color:var(--text);border:1px solid var(--line2);border-radius:8px;padding:7px 9px;font-family:inherit;margin-bottom:9px;outline:none}
+.pop .acts{display:flex;gap:8px}
+.pop .arrow{position:absolute;top:-6px;left:22px;width:10px;height:10px;background:var(--card);border-left:1px solid var(--line2);border-top:1px solid var(--line2);transform:rotate(45deg)}
+.foot{display:flex;align-items:center;justify-content:space-between;margin-top:16px;gap:14px}
+.stat{color:var(--dim);font-size:13px}
+.stat b{color:var(--text)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:12px 18px;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;font-size:13.5px;z-index:30;max-width:80vw}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:40}
+.mask.show{display:flex}
+.dlg{background:var(--card);border-radius:14px;padding:20px 22px;width:380px;border:1px solid var(--line2)}
+.dlg h3{margin:0 0 8px;font-size:16px}
+.dlg p{margin:0 0 16px;color:var(--dim);font-size:13.5px}
+.dlg .acts{display:flex;gap:10px;justify-content:flex-end}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">SubAI <i>Translator</i>　<span style="font-size:11.5px;border:1px solid var(--line2);border-radius:20px;padding:1px 8px;color:var(--dim)">确认页原型 v2</span></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="toggleTheme()">切换主题</button>
+      <button class="btn" onclick="toast('原型演示：返回上一步')">返回</button>
+    </div>
+  </div>
+
+  <h1>确认字幕（这一步还不出片）</h1>
+  <div class="sub" id="headstat">先核对字幕，改完再生成视频　·　共 18 行　·　可疑 3 处　·　已改 1 处</div>
+
+  <div class="grid">
+    <div>
+      <div class="card" style="padding:14px">
+        <div class="player">
+          <div class="ph">视频预览<br>（点字幕行跳到对应画面）</div>
+          <div class="play" onclick="toast('原型演示：播放，字幕跟随高亮')"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          <div class="cap" id="cap">他可以给你了</div>
+        </div>
+        <div class="bar" id="bar"></div>
+        <div class="legend"><span><s></s>有字幕</span><span><i></i>可疑（点黄点跳过去）</span><span id="curline" style="margin-left:auto">第 1 / 18 行</span></div>
+        <div class="fix">
+          <span><b>已自动纠正 2 处</b>：车离点→撤离点　·　换单→换弹</span>
+          <a onclick="showFixed()">在列表里查看</a>
+        </div>
+      </div>
+      <div class="card" style="padding:13px 14px;margin-top:14px">
+        <div class="tip" style="margin:0">黄色行代表识别不确定，点黄字可修改并记住。<span class="q" title="改过的词会先记入「待确认纠错」，你在术语库页一次性采纳后才生效。">?</span></div>
+      </div>
+    </div>
+
+    <div class="card" style="position:relative">
+      <div class="list" id="list"></div>
+      <div class="pop" id="pop" style="display:none">
+        <div class="arrow" id="poparrow"></div>
+        <h4>这个词对吗？</h4>
+        <p>识别结果：<b id="popword"></b><br>没命中术语库，确认一次以后就认得。</p>
+        <input id="popinput" placeholder="">
+        <div class="acts">
+          <button class="btn" onclick="closePop(false)">对的，保留</button>
+          <button class="btn primary" style="padding:9px 14px" onclick="closePop(true)">改成这个</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="stat" id="footstat">本次改动 <b>1</b> 处，将记入「待确认纠错」</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn" onclick="toast('已保存草稿，稍后可从任务列表继续')">保存草稿</button>
+      <button class="primary" onclick="tryRender()">确认无误，生成视频</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="mask">
+  <div class="dlg">
+    <h3>还有 <span id="warnleft">3</span> 处可疑字幕没确认</h3>
+    <p>强行生成可能把错字保留到成品里。建议先逐条确认，或直接继续（之后仍可改字幕重新出片）。</p>
+    <div class="acts">
+      <button class="btn" onclick="closeDlg()">回去确认</button>
+      <button class="btn primary" style="padding:10px 18px" onclick="doRender()">继续生成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var ROWS = [
+ ["00:00.0","他可以给你了","ok"],
+ ["00:01.1","我有我有","warn"],
+ ["00:04.9","别急着上，先看一下","ok"],
+ ["00:07.2","他从右边绕过来了","ok"],
+ ["00:09.8","撤离点在东边","warn"],
+ ["00:12.0","换弹，我掩护你","fixed"],
+ ["00:14.6","这波打得很稳","ok"],
+ ["00:17.1","剩下两个，别恋战","warn"],
+ ["00:19.4","我去拉一下枪线","ok"],
+ ["00:21.8","小心楼上有狙","ok"],
+ ["00:24.0","先补个甲再上","ok"],
+ ["00:26.5","他从后门进来了","ok"],
+ ["00:29.1","车离点已经开了","fixed"],
+ ["00:31.6","别贪，先撤","ok"],
+ ["00:34.2","我这边没人","ok"],
+ ["00:36.9","对面在打药","ok"],
+ ["00:39.3","最后一波，稳住","ok"],
+ ["00:41.7","赢了这一局","ok"]
+];
+var POP_ROW = -1;
+var ACTIONS = 1;
+
+function warnCount() { var n = 0; for (var i = 0; i < ROWS.length; i++) if (ROWS[i][2] === "warn") n++; return n; }
+
+function build() {
+  var box = document.getElementById("list");
+  var h = "";
+  for (var i = 0; i < ROWS.length; i++) {
+    var r = ROWS[i];
+    var cls = "row"; if (r[2] === "warn") cls += " warn"; if (r[2] === "fixed") cls += " fixed"; if (i === 0) cls += " on";
+    h += '<div class="' + cls + '" data-i="' + i + '" onclick="pick(' + i + ')">';
+    h += '<div class="t">' + r[0] + '</div><div class="txt">';
+    if (r[2] === "warn") {
+      h += '<u onclick="event.stopPropagation();openPop(' + i + ',event)">' + r[1] + '</u><span class="tag">待确认</span>';
+    } else if (r[2] === "fixed") {
+      h += r[1] + '<span class="tag fix">自动纠正</span>';
+    } else {
+      h += r[1];
+    }
+    h += '</div></div>';
+  }
+  box.innerHTML = h;
+  var bar = document.getElementById("bar");
+  var b = "";
+  for (var k = 0; k < ROWS.length; k++) {
+    var left = (k / ROWS.length) * 100;
+    var w = 100 / ROWS.length - 1;
+    b += '<div class="seg" style="left:' + left + '%;width:' + w + '%"></div>';
+    if (ROWS[k][2] === "warn") b += '<div class="dot" style="left:calc(' + left + '% + 1px)" title="可疑：' + ROWS[k][1] + '" onclick="pick(' + k + ')"></div>';
+  }
+  b += '<div class="head" style="left:0%"></div>';
+  bar.innerHTML = b;
+  document.getElementById("warnleft").textContent = warnCount();
+}
+
+function pick(i) {
+  var all = document.querySelectorAll(".row");
+  for (var k = 0; k < all.length; k++) all[k].className = all[k].className.replace(" on", "");
+  document.querySelector('.row[data-i="' + i + '"]').className += " on";
+  document.getElementById("cap").textContent = ROWS[i][1];
+  document.getElementById("curline").textContent = "第 " + (i + 1) + " / " + ROWS.length + " 行";
+  closePop(false);
+}
+
+function openPop(i, ev) {
+  POP_ROW = i;
+  var box = document.getElementById("pop");
+  var row = document.querySelector('.row[data-i="' + i + '"]');
+  var listBox = document.getElementById("list");
+  box.style.display = "block";
+  var top = row.offsetTop + row.offsetHeight + 8;
+  var maxTop = listBox.clientHeight - box.offsetHeight - 8;
+  if (top > maxTop) top = Math.max(8, row.offsetTop - box.offsetHeight - 8);
+  box.style.top = top + "px";
+  box.style.left = "16px";
+  var arrow = document.getElementById("poparrow");
+  arrow.style.left = Math.max(12, (ev ? ev.clientX - 120 : 22)) + "px";
+  document.getElementById("popword").textContent = ROWS[i][1];
+  var inp = document.getElementById("popinput");
+  inp.value = ROWS[i][1];
+  inp.placeholder = "改成…（默认是当前整句，可只改那个词）";
+  inp.focus();
+}
+
+function closePop(save) {
+  var box = document.getElementById("pop");
+  if (box.style.display === "block" && POP_ROW >= 0) {
+    var v = document.getElementById("popinput").value.trim();
+    if (save && v && v !== ROWS[POP_ROW][1]) {
+      ROWS[POP_ROW][1] = v; ROWS[POP_ROW][2] = "ok"; ACTIONS++;
+      toast("已记录：这句改动 → 待确认纠错");
+    } else if (save) {
+      ROWS[POP_ROW][2] = "ok";
+      toast("已确认这句没问题，记入待确认纠错");
+    }
+    build();
+    updStat();
+  }
+  box.style.display = "none";
+  POP_ROW = -1;
+}
+
+function showFixed() {
+  build();
+  var all = document.querySelectorAll('.row.fixed');
+  for (var k = 0; k < all.length; k++) all[k].className += " on";
+  toast("已高亮 " + all.length + " 行自动纠正（可点进去改回去）");
+}
+
+function updStat() {
+  document.getElementById("footstat").innerHTML = "本次改动 <b>" + ACTIONS + "</b> 处，将记入「待确认纠错」";
+  document.getElementById("headstat").textContent = "先核对字幕，改完再生成视频　·　共 " + ROWS.length + " 行　·　可疑 " + warnCount() + " 处　·　已改 " + ACTIONS + " 处";
+}
+
+function tryRender() {
+  if (warnCount() > 0) { document.getElementById("mask").className = "mask show"; return; }
+  doRender();
+}
+function closeDlg() { document.getElementById("mask").className = "mask"; }
+function doRender() { closeDlg(); toast("原型演示：确认通过 → 开始生成视频（带进度条）"); }
+
+var tt;
+function toast(m) {
+  var el = document.getElementById("toast");
+  el.textContent = m; el.className = "toast show";
+  clearTimeout(tt); tt = setTimeout(function () { el.className = "toast"; }, 2600);
+}
+function toggleTheme() { var h = document.documentElement; h.className = (h.className === "light") ? "dark" : "light"; }
+
+build(); updStat();
+</script>
+</body>
+</html>

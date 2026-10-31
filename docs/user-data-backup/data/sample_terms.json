@@ -1,0 +1,74 @@
+[
+  {
+    "source": "人工智能",
+    "translation": "Artificial Intelligence",
+    "priority": "high",
+    "category": "domain"
+  },
+  {
+    "source": "机器学习",
+    "translation": "Machine Learning",
+    "priority": "high",
+    "category": "domain"
+  },
+  {
+    "source": "深度学习",
+    "translation": "Deep Learning",
+    "priority": "high",
+    "category": "domain"
+  },
+  {
+    "source": "自然语言处理",
+    "translation": "Natural Language Processing",
+    "priority": "high",
+    "category": "domain"
+  },
+  {
+    "source": "计算机视觉",
+    "translation": "Computer Vision",
+    "priority": "high",
+    "category": "domain"
+  },
+  {
+    "source": "语音识别",
+    "translation": "Speech Recognition",
+    "priority": "medium",
+    "category": "domain"
+  },
+  {
+    "source": "字幕翻译",
+    "translation": "Subtitle Translation",
+    "priority": "medium",
+    "category": "domain"
+  },
+  {
+    "source": "硬字幕",
+    "translation": "Hard Subtitle",
+    "priority": "medium",
+    "category": "domain"
+  },
+  {
+    "source": "软字幕",
+    "translation": "Soft Subtitle",
+    "priority": "medium",
+    "category": "domain"
+  },
+  {
+    "source": "测试",
+    "translation": "Test",
+    "priority": "low",
+    "category": "custom"
+  },
+  {
+    "source": "欢迎",
+    "translation": "Welcome",
+    "priority": "low",
+    "category": "custom"
+  },
+  {
+    "source": "你好",
+    "translation": "Hello",
+    "priority": "low",
+    "category": "custom"
+  }
+]

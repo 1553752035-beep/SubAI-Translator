@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubAI Translator —— 界面原型 v4（双主题 · 定稿候选）</title>
+<style>
+:root,html.dark{--bg:#0e0f13;--bg2:#16181f;--bg3:#1d2029;--line:#262a36;--line2:#323848;--text:#eceef5;--dim:#9aa0b4;--accent:#8f84ff;--soft:rgba(143,132,255,.16);--ok:#39d98a;--note:#5f677d;--ghost-bg:#171a22;--ghost-fg:#c9cee0;--ghost-hover:#fff;--dis-bg:#2a2e3d;--dis-fg:#767c92;--tag-bg:#141821;--tag-fg:#aeb6cc;--tag-line:#2b3242;--hover:#1a1c26;--drag-bg:#1e1b2e;--input-bg:#101219;--input-line:#323848;--input-fg:#eceef5;--chip-fg:#b6bdd1;--bar-bg:#21242f;--drawer-bg:#14161d;--toast-bg:#232838;--toast-fg:#fff;--toast-line:#323848;--ctrl-chip:#ffffff1a;--shadow:none}
+html.light{--bg:#f5f6fa;--bg2:#ffffff;--bg3:#f0f2f8;--line:#e8ebf3;--line2:#d7dce8;--text:#1b1e28;--dim:#5b6272;--accent:#5b4be0;--soft:rgba(91,75,224,.10);--ok:#12a150;--note:#6f7688;--ghost-bg:#ffffff;--ghost-fg:#394053;--ghost-hover:#1b1e28;--dis-bg:#eceef4;--dis-fg:#9aa1b2;--tag-bg:#ffffff;--tag-fg:#4b5265;--tag-line:#e2e6f0;--hover:#f3f5fa;--drag-bg:#f1eefc;--input-bg:#ffffff;--input-line:#d7dce8;--input-fg:#1b1e28;--chip-fg:#4b5265;--bar-bg:#e9ecf4;--drawer-bg:#ffffff;--toast-bg:#1b1e28;--toast-fg:#fff;--toast-line:#2a2f3c;--ctrl-chip:#ffffff26;--shadow:0 1px 2px rgba(16,24,40,.06)}
+*{box-sizing:border-box}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.6}
+.app{max-width:780px;margin:0 auto;padding:20px 24px 48px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:30px}
+.brand{font-size:16px;font-weight:600;letter-spacing:.2px}
+.brand i{font-style:normal;color:var(--accent)}
+.watermark{position:fixed;right:14px;bottom:9px;color:var(--note);font-size:11.5px;opacity:.7;pointer-events:none}
+button{font-family:inherit;font-size:14px;cursor:pointer;border:0;border-radius:10px;padding:9px 15px;transition:.16s}
+.ghost{background:var(--ghost-bg);color:var(--ghost-fg);border:1px solid var(--line2)}
+.ghost:hover{border-color:var(--accent);color:var(--ghost-hover)}
+.primary{background:var(--accent);color:#fff;padding:13px 30px;font-size:15px;font-weight:600}
+.primary:hover{filter:brightness(1.12)}
+.primary:disabled{background:var(--dis-bg);color:var(--dis-fg);cursor:not-allowed}
+h1{font-size:21px;margin:0 0 10px;font-weight:600}
+h2{font-size:19px;margin:0 0 6px;font-weight:600}
+.sub{color:var(--dim);font-size:13.5px;margin-bottom:20px}
+.screen{display:none}.screen.active{display:block;animation:fade .2s ease}
+@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.promise{position:absolute;left:0;right:0;bottom:15px;display:flex;justify-content:center}
+.promise span{display:inline-flex;align-items:center;gap:6px;color:var(--dim);font-size:12.5px}
+.promise svg{width:14px;height:14px;color:var(--accent)}
+.tag svg{width:14px;height:14px;color:var(--ok)}
+.drop{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:380px;border:1.5px solid var(--line2);border-radius:16px;background:var(--bg2);box-shadow:var(--shadow);cursor:pointer;transition:.16s;text-align:center;padding:40px 24px}
+.drop:hover{border-color:var(--accent);background:var(--hover);box-shadow:0 0 0 4px var(--soft)}
+.drop.dragging{border-color:var(--accent);background:var(--drag-bg);box-shadow:0 0 0 6px var(--soft)}
+.drop .pic{width:46px;height:46px;color:var(--accent);margin-bottom:8px}
+.drop .pic svg{width:100%;height:100%}
+.drop .t{font-size:18px;font-weight:600}
+.drop .d{color:var(--dim);font-size:13px}
+.hintline{margin-top:14px;color:var(--note);font-size:12.5px;text-align:center}
+.fileline{margin-top:14px;color:var(--ok);font-size:13.5px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:22px 18px;cursor:pointer;transition:.16s;box-shadow:var(--shadow)}
+.card:hover{border-color:var(--accent);background:var(--bg3);box-shadow:0 0 0 3px var(--soft)}
+.card .ico{width:24px;height:24px;color:var(--accent);margin-bottom:12px}
+.card .ico svg{width:100%;height:100%}
+.card .t{font-size:15.5px;font-weight:600;margin-bottom:6px}
+.card .d{color:var(--dim);font-size:13px}
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:6px 22px;margin-top:16px;box-shadow:var(--shadow)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 0;border-bottom:1px solid #21242f}
+.row:last-child{border-bottom:0}
+.row .k{font-size:14px}.row .h{color:var(--dim);font-size:12px;margin-top:2px}
+select,input[type=text],textarea{background:var(--input-bg);color:var(--input-fg);border:1px solid var(--input-line);border-radius:9px;padding:9px 12px;font-family:inherit;font-size:14px;outline:none}
+select:focus,textarea:focus,input:focus{border-color:var(--accent)}
+textarea{width:100%;min-height:160px;resize:vertical;line-height:1.8}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{background:var(--input-bg);border:1px solid var(--input-line);border-radius:20px;padding:7px 15px;font-size:13px;color:var(--chip-fg);cursor:pointer;transition:.15s}
+.chip:hover{border-color:var(--accent)}
+.chip.on{border-color:var(--accent);color:#fff;background:var(--soft)}
+.bar{height:8px;background:var(--bar-bg);border-radius:99px;overflow:hidden;margin:16px 0 12px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#4a8bff);transition:width .3s}
+.steps{color:var(--dim);font-size:13px}
+.donewrap{text-align:center}.donewrap .ck{width:52px;height:52px;color:var(--ok);margin:0 auto 6px}.donewrap .ck svg{width:100%;height:100%}
+.out{background:var(--input-bg);border:1px solid var(--line2);border-radius:10px;padding:12px 14px;font-size:14px;margin:16px 0;word-break:break-all;text-align:center}
+.actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.player{background:#0f1116;border-radius:12px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:#4d5468;font-size:13px;position:relative;overflow:hidden}
+.player .ctrl{position:absolute;left:14px;right:14px;bottom:12px;display:flex;align-items:center;gap:10px;color:#c3c8d8}
+.player .ctrl .p{background:var(--ctrl-chip);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+.subs{margin-top:14px}
+.sub-row{display:flex;gap:12px;align-items:flex-start;padding:9px 10px;border-radius:9px;cursor:pointer;transition:.12s}
+.sub-row:hover{background:var(--hover)}
+.sub-row .tm{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums;padding-top:3px;min-width:104px}
+.sub-row .tx{flex:1;font-size:14px}
+.sub-row input{width:100%}
+.drawer{position:fixed;top:0;right:-370px;width:340px;height:100%;background:var(--drawer-bg);border-left:1px solid var(--line2);padding:24px;transition:right .22s ease;z-index:20}
+.drawer.open{right:0}
+.drawer h3{margin:0 0 4px;font-size:16px}
+.drawer .n{color:var(--dim);font-size:12px;margin-bottom:16px}
+.drawer .item{padding:13px 0;border-bottom:1px solid #21242f;cursor:pointer}
+.drawer .item:hover .t{color:var(--accent)}
+.drawer .item .t{font-size:14px;font-weight:500}.drawer .item .d{color:var(--dim);font-size:12px}
+.toast{position:fixed;left:50%;bottom:32px;transform:translate(-50%,18px);background:var(--toast-bg);border:1px solid var(--toast-line);color:var(--toast-fg);padding:11px 20px;border-radius:10px;font-size:14px;opacity:0;transition:.22s;pointer-events:none}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.back{background:transparent;color:var(--dim);padding:4px 0;font-size:13px}
+.back:hover{color:var(--accent)}
+.center{text-align:center;margin-top:20px}
+@media(max-width:720px){.cards{grid-template-columns:1fr}}
+.themepick{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:560px;margin-top:6px}
+.tcard{background:var(--bg2);border:1.5px solid var(--line2);border-radius:14px;padding:14px;cursor:pointer;text-align:left;transition:.16s;box-shadow:var(--shadow)}
+.tcard:hover{border-color:var(--accent);box-shadow:0 0 0 4px var(--soft)}
+.tcard .t{font-size:15px;font-weight:600;margin-top:11px}
+.tcard .d{color:var(--dim);font-size:12.5px}
+.prev{border-radius:9px;height:102px;padding:11px;display:flex;flex-direction:column;gap:7px;border:1px solid rgba(128,128,150,.18)}
+.prev i{display:block;height:8px;border-radius:4px;background:var(--bar-bg)}
+.prev i:first-child{width:46%}
+.p-light{background:#ffffff}.p-light i{background:#e6e9f2}.p-light i:first-child{background:#c9cfe0}
+.p-dark{background:#14161d}.p-dark i{background:#2b3040}.p-dark i:first-child{background:#414963}
+</style></head><body>
+<div class="app">
+  <div class="top">
+    <div class="brand">SubAI <i>Translator</i></div>
+    <div style="display:flex;align-items:center;gap:9px"><button class="ghost" onclick="toggleTheme()" id="themeBtn">切换主题</button><button class="ghost" onclick="toggleAdv()">高级 ›</button></div>
+  </div>
+  <section id="s0" class="screen active">
+    <h1>先选一个界面主题</h1>
+    <div class="sub">选完我会记住，下次打开不再问。之后也能随时在右上角切换。</div>
+    <div class="themepick">
+      <button class="tcard" onclick="setTheme('light')">
+        <div class="prev p-light"><i></i><i></i><i></i></div>
+        <div class="t">浅色</div>
+        <div class="d">白底，白天看着清楚</div>
+      </button>
+      <button class="tcard" onclick="setTheme('dark')">
+        <div class="prev p-dark"><i></i><i></i><i></i></div>
+        <div class="t">深色</div>
+        <div class="d">暗底，晚上不刺眼</div>
+      </button>
+    </div>
+    <div class="hintline">你的选择保存在本机（localStorage），不会被上传。</div>
+  </section>
+
+  <section id="s1" class="screen">
+    <h1>给视频加字幕</h1>
+    <label class="drop" id="dropZone" for="pick">
+      <div class="pic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4m0 0L8.5 7.5M12 4l3.5 3.5"/><path d="M3.5 14v3.5A2.5 2.5 0 0 0 6 20h12a2.5 2.5 0 0 0 2.5-2.5V14"/></svg></div>
+      <div class="t">把视频拖进来，或点击选择</div>
+      <div class="d">支持 mp4 · mkv · mov · avi · flv · webm</div>
+      <div class="promise"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7 2.8V12c0 4.4-2.9 7.9-7 9-4.1-1.1-7-4.6-7-9V5.8L12 3z"/><path d="M9 12.2l2 2 4-4"/></svg>原视频不会被改动，成品另存为新文件</span></div>
+    </label>
+    <input id="pick" type="file" accept="video/*" style="display:none" onchange="picked(this)">
+    <div id="pickedName" class="fileline"></div>
+    <div class="hintline">可翻译 72 种语言 · 自动判断语言 · 没有字幕文件也能自动生成</div>
+  </section>
+  <section id="s2" class="screen">
+    <button class="back" onclick="show(1)">← 换个视频</button>
+    <h2 style="margin-top:10px">这个视频，你想怎么处理？</h2>
+    <div class="sub">选一个就行，后面还能改。</div>
+    <div class="cards">
+      <div class="card" onclick="go(3)"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.6 2.4 14.4 0 17M12 3.5c-2.4 2.6-2.4 14.4 0 17"/></svg></div><div class="t">翻译</div><div class="d">识别说话或画面字幕，翻成别的语言，直接出成品</div></div>
+      <div class="card" onclick="go(4)"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M20.5 11.5a7.5 7.5 0 0 1-7.5 7.5H9l-4.5 2.5L5.6 17A7.5 7.5 0 1 1 20.5 11.5z"/></svg></div><div class="t">只加字幕，不翻译</div><div class="d">自动识别原文；或用我已有的字幕文件</div></div>
+      <div class="card" onclick="go(5)"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M4 20h4L20.5 7.5 16.5 3.5 4 16v4z"/><path d="M14.5 5.5l4 4"/></svg></div><div class="t">我有文字稿</div><div class="d">把台词粘进去，自动对齐时间轴</div></div>
+    </div>
+  </section>
+  <section id="s3" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">翻译设置</h2>
+    <div class="sub">识别语言：自动判断</div>
+    <div class="panel">
+      <div class="row"><div><div class="k">翻译成</div><div class="h">最常用的放前面</div></div>
+        <select id="toLang"><option>中文</option><option>English</option><option>日本語</option><option>한국어</option><option>Русский</option></select></div>
+      <div class="row"><div><div class="k">成品形式</div><div class="h">软字幕最快；要发手机看就选硬字幕</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this)">软字幕 MKV</span><span class="chip" onclick="pickChip(this)">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this)">两个都要</span></div></div>
+      <div class="row"><div><div class="k">识别来源</div><div class="h">说话声，还是画面里的字幕</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this)">说话声</span><span class="chip" onclick="pickChip(this)">画面字幕 OCR</span></div></div>
+    </div>
+    <div class="center"><button class="primary" onclick="start('识别 → 翻译 → 压制')">开始</button></div>
+  </section>
+  <section id="s4" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">只加字幕（不翻译）</h2>
+    <div class="sub">适合游戏集锦、Vlog、教程。</div>
+    <div class="panel">
+      <div class="row"><div><div class="k">字幕从哪来</div><div class="h">没有字幕文件就自动识别</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this)">自动识别说话声</span><span class="chip" onclick="pickChip(this)">我已有字幕文件</span></div></div>
+      <div class="row"><div><div class="k">去背景音</div><div class="h">音乐太吵时打开，识别更准（慢一些）</div></div>
+        <div class="chips"><span class="chip" onclick="pickChip(this)">关</span><span class="chip" onclick="pickChip(this)">开</span></div></div>
+      <div class="row"><div><div class="k">成品形式</div><div class="h">软字幕最快；要发手机看就选硬字幕</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this)">软字幕 MKV</span><span class="chip" onclick="pickChip(this)">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this)">两个都要</span></div></div>
+    </div>
+    <div class="center"><button class="primary" onclick="start('识别原文 → 加字幕 → 压制')">开始</button></div>
+  </section>
+  <section id="s5" class="screen">
+    <button class="back" onclick="show(2)">← 返回</button>
+    <h2 style="margin-top:10px">我有文字稿</h2>
+    <div class="sub">一行一句，直接粘进来。我会自动把每句话对上时间轴，你不用管时间。</div>
+    <div class="panel">
+      <textarea id="script">兄弟们这波看我操作
+别急，等他先动
+好，他要跳了
+就是现在，压枪
+三杀，直接带走</textarea>
+      <div class="row"><div><div class="k">成品形式</div><div class="h">软字幕最快；要发手机看就选硬字幕</div></div>
+        <div class="chips"><span class="chip on" onclick="pickChip(this)">软字幕 MKV</span><span class="chip" onclick="pickChip(this)">硬字幕（烧进画面）</span><span class="chip" onclick="pickChip(this)">两个都要</span></div></div>
+    </div>
+    <div class="center"><button class="primary" onclick="start('对齐时间轴 → 压制')">开始</button></div>
+  </section>
+  <section id="s6" class="screen">
+    <h2>正在处理…</h2>
+    <div class="sub" id="runName"></div>
+    <div class="panel" style="text-align:center;padding:22px">
+      <div class="bar"><i id="barIn"></i></div>
+      <div class="steps" id="stepText">准备中…</div>
+      <div style="margin-top:20px"><button class="ghost" onclick="show(2)">取消</button></div>
+    </div>
+  </section>
+  <section id="s7" class="screen">
+    <div class="donewrap"><div class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.4l2.6 2.6L16 9.6"/></svg></div></div>
+    <h2 style="text-align:center">好了！</h2>
+    <div class="sub" style="text-align:center">原视频没动过，成品是另一个文件。</div>
+    <div class="out" id="outFile"></div>
+    <div class="actions">
+      <button class="primary" onclick="toast('（原型示意）已打开文件夹')">打开文件夹</button>
+      <button class="ghost" onclick="toast('（原型示意）用系统播放器打开')">播放</button>
+      <button class="ghost" onclick="go(8)">改字幕</button>
+      <button class="ghost" onclick="show(1)">再做一个</button>
+    </div>
+  </section>
+  <section id="s8" class="screen">
+    <button class="back" onclick="show(7)">← 返回</button>
+    <h2 style="margin-top:10px">改字幕</h2>
+    <div class="sub">点哪一行就改哪一行；只改文字，时间不用管。</div>
+    <div class="player">播放器预览（原型示意）<div class="ctrl"><span class="p">▶</span><span style="flex:1;height:4px;background:#2b3040;border-radius:9px"></span><span style="font-size:12px">00:12 / 03:40</span></div></div>
+    <div class="subs" id="subList"></div>
+    <div class="center"><button class="primary" onclick="toast('已保存，正在重新出片…')">保存并重新出片</button></div>
+  </section>
+</div>
+<div class="watermark">原型 · 功能为演示</div>
+<div class="drawer" id="adv">
+  <h3>高级功能</h3><div class="n">平时用不到，都收在这里</div>
+  <div class="item" onclick="toast('术语库（原型示意）')"><div class="t">术语库</div><div class="d">人名、游戏名词固定译法</div></div>
+  <div class="item" onclick="toast('插件（原型示意）')"><div class="t">插件</div><div class="d">换翻译模型、OCR、配音</div></div>
+  <div class="item" onclick="toast('API 开放平台（原型示意）')"><div class="t">API / 开放平台</div><div class="d">给别的程序调用</div></div>
+  <div class="item" onclick="toast('报表（原型示意）')"><div class="t">使用报表</div><div class="d">做了多少、成功率</div></div>
+  <div class="item" onclick="toast('设置（原型示意）')"><div class="t">设置</div><div class="d">翻译服务、显卡、输出目录</div></div>
+  <div class="item" onclick="toast('帮助（原型示意）')"><div class="t">使用帮助</div><div class="d">常见问题</div></div>
+  <div style="margin-top:16px"><button class="ghost" onclick="toggleAdv()">收起</button></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+var fname="精彩操作集锦.mp4";
+var fmtChoice="soft";
+var subs=["兄弟们这波看我操作","别急，等他先动","好，他要跳了","就是现在，压枪","三杀，直接带走","这波不亏","走位躲一下","唉，差一点点","稳住，别急","下一把继续"];
+function show(n){var e=document.querySelectorAll(".screen");for(var i=0;i<e.length;i++){e[i].classList.remove("active")}document.getElementById("s"+n).classList.add("active");window.scrollTo(0,0);document.getElementById("adv").classList.remove("open")}
+function outList(){var b=fname.replace(/\.[^.]+$/,"");if(fmtChoice==="hard"){return[b+"_中文字幕.mp4"]}if(fmtChoice==="both"){return[b+"_中文字幕.mkv",b+"_中文字幕.mp4（硬字幕）"]}return[b+"_中文字幕.mkv"]}
+function go(n){if(n===7){var ls=outList(),box=document.getElementById("outFile"),s="";for(var i=0;i<ls.length;i++){s+="<div>"+ls[i]+"</div>"}box.innerHTML=s}if(n===8){buildSubs()}show(n)}
+function picked(i){var f=i.files&&i.files[0];if(f){fname=f.name}document.getElementById("pickedName").textContent="已选择："+fname+"　正在进入下一步…";setTimeout(function(){show(2)},260)}
+function pickChip(el){var p=el.parentNode;for(var i=0;i<p.children.length;i++){p.children[i].classList.remove("on")}el.classList.add("on");var t=el.textContent;if(t.indexOf("硬字幕")===0){fmtChoice="hard"}else if(t.indexOf("两个")===0){fmtChoice="both"}else if(t.indexOf("软字幕")===0){fmtChoice="soft"}}
+function start(what){show(6);document.getElementById("runName").textContent=fname+"　·　"+what;var s=["识别语音…","翻译…","生成字幕…","压制视频…"];var p=0,b=document.getElementById("barIn"),t=document.getElementById("stepText");var iv=setInterval(function(){p+=6;if(p>100){p=100}b.style.width=p+"%";t.textContent=s[Math.min(s.length-1,Math.floor(p/26))];if(p>=100){clearInterval(iv);setTimeout(function(){go(7)},420)}},150)}
+function buildSubs(){var box=document.getElementById("subList");if(box.childElementCount)return;for(var i=0;i<subs.length;i++){(function(n){var d=document.createElement("div");d.className="sub-row";var tm=document.createElement("div");tm.className="tm";var a=n*4+1,b2=a+3;tm.textContent="00:"+(a<10?"0":"")+a+" → 00:"+(b2<10?"0":"")+b2;var tx=document.createElement("div");tx.className="tx";tx.textContent=subs[n];d.appendChild(tm);d.appendChild(tx);d.onclick=function(){edit(d,tx,n)};box.appendChild(d)})(i)}}
+function edit(row,tx,n){if(row.querySelector("input"))return;var v=tx.textContent;tx.textContent="";var inp=document.createElement("input");inp.type="text";inp.value=v;tx.appendChild(inp);inp.focus();inp.select();function done(){subs[n]=inp.value||v;tx.textContent=subs[n]}inp.onblur=done;inp.onkeydown=function(e){if(e.key==="Enter"){done()}}}
+function toggleAdv(){document.getElementById("adv").classList.toggle("open")}
+var THEMEKEY="subai_theme";
+function applyTheme(t){document.documentElement.className=t;var b=document.getElementById("themeBtn");if(b){b.textContent=(t==="light"?"切换到深色":"切换到浅色")}}
+function setTheme(t){try{localStorage.setItem(THEMEKEY,t)}catch(e){}applyTheme(t);show(1)}
+function toggleTheme(){setTheme(document.documentElement.className==="light"?"dark":"light")}
+function initTheme(){var saved=null;try{saved=localStorage.getItem(THEMEKEY)}catch(e){}if(saved==="light"||saved==="dark"){applyTheme(saved);show(1);return}var sysLight=false;try{sysLight=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches}catch(e){}applyTheme(sysLight?"light":"dark");show(0)}
+var tt;function toast(m){var e=document.getElementById("toast");e.textContent=m;e.classList.add("show");clearTimeout(tt);tt=setTimeout(function(){e.classList.remove("show")},1800)}
+var dz=document.getElementById("dropZone");
+["dragenter","dragover"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add("dragging")})});
+["dragleave","drop"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove("dragging")})});
+dz.addEventListener("drop",function(e){var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f){fname=f.name}document.getElementById("pickedName").textContent="已选择："+fname+"　正在进入下一步…";setTimeout(function(){show(2)},260)});
+initTheme();
+</script></body></html>

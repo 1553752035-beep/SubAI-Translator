@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+<meta charset="utf-8">
+<title>确认页整页原型 v13</title>
+<style>
+html.light{--bg:#f5f6fa;--card:#fff;--line:#e8ebf3;--line2:#c9d0e0;--text:#1b1e28;--dim:#565d6d;--accent:#5b4be0;--soft:rgba(91,75,224,.10);--warn:#8a5a00;--warnbar:#f0b429;--warnbg:#fff8e6;--ok:#059669;--okbg:rgba(5,150,105,.08);--input:#fff}
+html.dark{--bg:#0e0f13;--card:#16181f;--line:#262a36;--line2:#3a4155;--text:#eceef5;--dim:#9aa0b4;--accent:#8f84ff;--soft:rgba(143,132,255,.16);--warn:#e2b04a;--warnbar:#e2b04a;--warnbg:rgba(226,176,74,.10);--ok:#39d98a;--okbg:rgba(57,217,138,.10);--input:#101219}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 22px 40px}
+.conf-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+h1{font-size:20px;margin:0 0 4px}
+.hint{color:var(--dim);font-size:13px;margin-top:6px}
+.kbd{display:inline-block;border:1px solid var(--line2);border-radius:5px;padding:0 5px;font-size:11.5px;color:var(--dim);margin:0 1px}
+.btn{font-family:inherit;font-size:13.5px;cursor:pointer;border-radius:10px;padding:9px 15px;background:var(--card);color:var(--text);border:1px solid var(--line2)}
+.btn:hover{border-color:var(--accent)}
+.primary{background:var(--accent);color:#fff;border-color:transparent;font-weight:600}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.player{background:#000;border-radius:12px;aspect-ratio:16/9;max-height:400px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.player .ph{color:#aab3c4;font-size:13px;text-align:center;padding:0 24px}
+.cap{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#fff;font-size:19px;text-shadow:0 1px 4px rgba(0,0,0,.9);padding:0 20px}
+.bar{height:8px;background:var(--line);border-radius:99px;margin-top:13px;position:relative}
+.bar .seg{position:absolute;top:0;bottom:0;background:var(--soft);border-radius:2px}
+.bar .dot{position:absolute;top:1px;width:6px;height:6px;border-radius:50%;background:var(--warnbar);cursor:pointer;border:1px solid var(--card)}
+.bar .head{position:absolute;top:-4px;width:2px;height:16px;background:var(--accent);border-radius:2px}
+.legend{display:flex;gap:14px;color:var(--dim);font-size:12px;margin-top:8px;align-items:center;flex-wrap:wrap}
+.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warnbar);margin-right:4px}
+.legend s{display:inline-block;width:14px;height:6px;border-radius:2px;background:var(--soft);margin-right:4px}
+.fixbox{background:var(--soft);border:1px solid var(--line2);border-radius:10px;padding:9px 12px;font-size:13px;margin-top:12px;display:flex;justify-content:space-between;gap:8px}
+.fixbox b{color:var(--accent)}
+.list{max-height:520px;overflow:auto;padding:8px 10px 14px}
+.row{position:relative;display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:9px;border-left:2px solid transparent;min-height:38px;cursor:pointer}
+.row:hover{background:var(--bg)}
+.row.cur{background:var(--soft);border-left-color:var(--accent)}
+.row.sus{background:var(--warnbg);border-left-color:var(--warnbar)}
+.row.done{background:var(--okbg);border-left-color:var(--ok)}
+.pt{width:12px;flex:none;color:var(--accent);font-size:11px}
+.t{color:var(--dim);font-size:11.5px;min-width:92px;font-variant-numeric:tabular-nums}
+.txt{flex:1;font-size:14.5px}
+.mark{font-size:11px;border:1px solid var(--line2);border-radius:20px;padding:0 7px;margin-left:8px;color:var(--dim)}
+.mark.sus{color:var(--warn);border-color:var(--warnbar)}
+.mark.ok{color:var(--ok);border-color:var(--ok)}
+.acts{margin-left:auto;opacity:0;transition:.15s}
+.row:hover .acts{opacity:1}
+.mini{font-size:11.5px;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:0 8px;cursor:pointer;background:var(--card)}
+.mini:hover{color:var(--accent);border-color:var(--accent)}
+.menu{position:absolute;right:10px;top:calc(100% - 4px);z-index:12;background:var(--card);border:1px solid var(--line2);border-radius:10px;padding:6px;box-shadow:0 10px 26px rgba(0,0,0,.20);min-width:196px;display:none}
+.menu.open{display:block}
+.menu div{font-size:12.5px;padding:5px 9px;border-radius:7px;cursor:pointer}
+.menu div:hover{background:var(--soft);color:var(--accent)}
+.menu .tip{color:var(--dim);font-size:11px;cursor:default}
+.menu .tip:hover{background:transparent;color:var(--dim)}
+.foot{margin-top:16px;display:flex;justify-content:flex-end;align-items:center;gap:12px}
+.foot .stat{color:var(--dim);font-size:13px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(14px);background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:11px 16px;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;transition:.25s;font-size:13.5px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="conf-top">
+    <div>
+      <h1>确认字幕（这一步还不出片）</h1>
+      <div class="hint" id="stat"></div>
+      <div class="hint"><span class="kbd">↑</span><span class="kbd">↓</span> 切换行 · <span class="kbd">Enter</span> 编辑 · <span class="kbd">Esc</span> 退出 · <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> 撤销 · 编辑时 <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> 拆分</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="toggleTheme()">切换主题</button>
+      <button class="btn" onclick="toast('原型演示：返回主界面')">← 返回主界面</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card" style="padding:14px">
+        <div class="player">
+          <div class="ph">原视频预览区<br>（真机里用 Tauri asset 协议播放原视频；点右侧字幕行可跳到对应时间）</div>
+          <div class="cap" id="cap">啊看不清啊</div>
+        </div>
+        <div class="bar" id="bar"></div>
+        <div class="legend">
+          <span><s></s>有字幕</span>
+          <span><i></i>可疑（点黄点跳过去）</span>
+          <span style="color:var(--accent)">▶ 当前行</span>
+          <span style="margin-left:auto" id="curline"></span>
+        </div>
+        <div class="fixbox"><span><b>术语包已自动纠正 2 处</b>：车离点→撤离点 · 换单→换弹</span><span style="color:var(--accent);cursor:pointer" onclick="toast('原型演示：在列表里高亮这两处')">在列表里查看</span></div>
+      </div>
+    </div>
+    <div class="card"><div class="list" id="list"></div></div>
+  </div>
+
+  <div class="foot">
+    <span class="stat" id="footstat"></span>
+    <button class="btn" onclick="toast('原型演示：保存草稿')">保存草稿</button>
+    <button class="btn primary" onclick="toast('原型演示：确认无误 → 生成视频')">确认无误，生成视频</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+var ROWS = [
+ {t:"00:00 → 00:04", x:"啊看不清啊", s:""},
+ {t:"00:06 → 00:07", x:"我就怕你嫌我慢", s:""},
+ {t:"00:07 → 00:08", x:"一个登机到这边", s:"语速异常"},
+ {t:"00:12 → 00:14", x:"不是刷火你明白吗", s:""},
+ {t:"00:21 → 00:24", x:"那个刷火房的房间怎么已经开了", s:""},
+ {t:"00:26 → 00:26", x:"等待", s:"可能漏字"},
+ {t:"00:27 → 00:33", x:"静默哎", s:"语速异常"},
+ {t:"00:34 → 00:36", x:"那小闻那小闻一个", s:""},
+ {t:"00:36 → 00:37", x:"二楼一个卖小闻", s:""},
+ {t:"00:43 → 00:44", x:"哎掉了一个", s:""},
+ {t:"00:47 → 00:48", x:"掉两个了掉两个了", s:""}
+];
+var CUR = 0, DIRTY = {}, MENU = -1;
+function wc(){ var n=0; for (var i=0;i<ROWS.length;i++) if (ROWS[i].s) n++; return n; }
+function render(){
+  var h = "";
+  for (var i=0;i<ROWS.length;i++){
+    var r = ROWS[i], cls = "row" + (i===CUR?" cur":"") + (r.s?" sus":"") + (DIRTY[i]?" done":"");
+    h += '<div class="'+cls+'" data-i="'+i+'" onclick="pick('+i+')" ondblclick="edit('+i+')">';
+    h += '<div class="pt">'+(i===CUR?"▶":"")+'</div><div class="t">'+r.t+'</div><div class="txt">'+r.x;
+    if (r.s) h += '<span class="mark sus">'+r.s+'</span>';
+    if (DIRTY[i]) h += '<span class="mark ok">已改</span>';
+    h += '</div><div class="acts"><span class="mini" onclick="event.stopPropagation();menu('+i+')">断句</span></div>';
+    h += '<div class="menu'+(MENU===i?" open":"")+'" onclick="event.stopPropagation()">';
+    h += '<div onclick="merge('+i+',-1)">⇧ 并入上行</div><div onclick="merge('+i+',1)">⇩ 并入下行</div>';
+    h += '<div class="tip">拆分：双击进编辑后按 Ctrl+Enter</div></div></div>';
+  }
+  document.getElementById("list").innerHTML = h;
+  var bar = document.getElementById("bar"), b = "";
+  var total = ROWS.length;
+  for (var k=0;k<total;k++){
+    var L=(k/total)*100, W=100/total-1;
+    b += '<span class="seg" style="left:'+L+'%;width:'+W+'%"></span>';
+    if (ROWS[k].s) b += '<span class="dot" style="left:calc('+L+'% + 1px)" title="可疑：'+ROWS[k].x+'" onclick="pick('+k+')"></span>';
+  }
+  b += '<span class="head" style="left:'+((CUR/total)*100)+'%"></span>';
+  document.getElementById("bar").innerHTML = b;
+  document.getElementById("cap").textContent = ROWS[CUR].x;
+  document.getElementById("curline").textContent = "第 " + (CUR+1) + " / " + total + " 行";
+  document.getElementById("stat").innerHTML = "共 " + total + " 行　·　<b style='color:var(--warn)'>可疑 " + wc() + " 处</b>　·　已改 " + Object.keys(DIRTY).filter(function(k){return DIRTY[k];}).length + " 处";
+  document.getElementById("footstat").textContent = Object.keys(DIRTY).length ? ("本次改动 " + Object.keys(DIRTY).length + " 处，将记入「待确认纠错」") : "还没有改动";
+}
+function pick(i){ CUR=i; MENU=-1; render(); }
+function menu(i){ MENU = (MENU===i ? -1 : i); render(); }
+function merge(i, d){ var j = d<0 ? i-1 : i+1; if (j<0||j>=ROWS.length){toast("已经到头了");return;} ROWS[j].x = (d<0?ROWS[j].x+ROWS[i].x:ROWS[i].x+ROWS[j].x); ROWS.splice(d<0?i:j,1); CUR=Math.max(0,Math.min(ROWS.length-1,d<0?i-1:i)); MENU=-1; render(); toast("已合并两行（Ctrl+Z 可撤销）"); }
+function edit(i){ DIRTY[i]=true; render(); toast("双击进入编辑态（真机里原地变输入框）"); }
+function toggleTheme(){ var h=document.documentElement; h.className=(h.className==="light")?"dark":"light"; }
+var tt;
+function toast(m){ var e=document.getElementById("toast"); e.textContent=m; e.className="toast show"; clearTimeout(tt); tt=setTimeout(function(){e.className="toast";},2400); }
+render();
+</script>
+</body>
+</html>

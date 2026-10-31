@@ -1,0 +1,123 @@
+[
+ {
+  "source": "往里炫",
+  "translation": "dig in",
+  "priority": "high",
+  "category": "custom",
+  "note": "用户口癖：=尽情吃，炫表吃"
+ },
+ {
+  "source": "1414",
+  "translation": "M14",
+  "priority": "high",
+  "category": "game",
+  "note": "用户念的是简称14，原文保真写成1414，译文展开成 M14 这把贵枪"
+ },
+ {
+  "source": "CX",
+  "translation": "MCX",
+  "priority": "high",
+  "category": "game",
+  "note": "游戏内 MCX 枪，朋友喊外号「马CX」，ASR 只记到 CX；原文保真，译文展开"
+ },
+ {
+  "source": "碰瓷M7",
+  "translation": "hold a candle to the M7",
+  "priority": "high",
+  "category": "custom",
+  "note": "碰瓷=调侃式比较不自量力；ASR 听成 possm7"
+ },
+ {
+  "source": "M7",
+  "translation": "M7",
+  "priority": "high",
+  "category": "game",
+  "note": "高级枪，用户确认无识别错误，仅防误译"
+ },
+ {
+  "source": "K416",
+  "translation": "K416",
+  "priority": "high",
+  "category": "game",
+  "note": "枪名；ASR 会听成 FPC16"
+ },
+ {
+  "source": "甲修",
+  "translation": "armor repair kit",
+  "priority": "high",
+  "category": "game",
+  "note": "修护甲道具；ASR 常听成甲球"
+ },
+ {
+  "source": "小金",
+  "translation": "gold item",
+  "priority": "high",
+  "category": "game",
+  "note": "金色单个变卖物；ASR 常听成小鸡"
+ },
+ {
+  "source": "牛的",
+  "translation": "sick",
+  "priority": "medium",
+  "category": "custom",
+  "note": "夸人厉害；ASR 常听成牛转"
+ },
+ {
+  "source": "血包",
+  "translation": "medkit",
+  "priority": "high",
+  "category": "game"
+ },
+ {
+  "source": "蓝斜",
+  "translation": "blue slope",
+  "priority": "high",
+  "category": "game",
+  "note": "蓝室斜坡简称"
+ },
+ {
+  "source": "离斜",
+  "translation": "centrifuge slope",
+  "priority": "high",
+  "category": "game",
+  "note": "离心斜坡简称"
+ },
+ {
+  "source": "给箭",
+  "translation": "give me an arrow",
+  "priority": "high",
+  "category": "game",
+  "note": "露娜大招，要信息"
+ },
+ {
+  "source": "宿舍",
+  "translation": "dorm",
+  "priority": "medium",
+  "category": "game"
+ },
+ {
+  "source": "航天基地",
+  "translation": "Space Base",
+  "priority": "medium",
+  "category": "game"
+ },
+ {
+  "source": "露娜",
+  "translation": "Luna",
+  "priority": "medium",
+  "category": "game"
+ },
+ {
+  "source": "三角洲行动",
+  "translation": "Delta Force",
+  "priority": "high",
+  "category": "game"
+ },
+ {
+  "source": "满改",
+  "translation": "fully modded",
+  "priority": "high",
+  "category": "game",
+  "note": "枪械满改装；ASR 会写成繁体「滿改」"
+ }
+]
