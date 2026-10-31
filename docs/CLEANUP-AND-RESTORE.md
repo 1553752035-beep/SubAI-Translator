@@ -14,9 +14,9 @@
 
 | 依赖 | 覆盖什么 | 验证方式 |
 |---|---|---|
-| **GitHub 仓库** | 324 个代码文件（源码/测试/文档/配置） | 见第一节 |
+| **GitHub 仓库** | 358 个文件（源码/测试/文档/配置/归档） | 见第一节 |
 | **本文档 + MODELS-AND-DEPS.md** | 所有模型/依赖的来源、版本、哈希 | 见第二、三节 |
-| **docs/local-ai-archive/** | `D:\AI` 的 17 个配置文件（含 26KB 调优报告） | 见第四节 |
+| **docs/local-ai-archive/** | `D:\AI` 的 18 个配置文件（含 26KB 调优报告） | 见第四节 |
 
 ---
 
@@ -31,7 +31,7 @@
 ### 仓库里有什么
 
 ```
-324 个文件，约 2.4 MB
+358 个文件，约 3.0 MB
   src/            185 个  后端源码
   tests/          197 个  测试
   frontend/src/    前端源码
@@ -98,7 +98,7 @@
 |---|---|---|
 | `.env` | <1 KB | **先复制到安全地方**，它含 `SUBAI_ASR_MODEL_DIR` 等本机路径 |
 | `data/*.db` | 约 150 KB | 词表/术语库/翻译缓存，**有用户数据**，建议备份 |
-| `项目总方案.md` | 150 KB | 已在 GitHub（`docs/` 里有同名内容） |
+| `项目总方案.md` | 105 KB | **已从会话记录还原并推送**（`docs/项目总方案.md`） |
 | `使用说明.txt` / `README.txt` | <1 KB | 已在 GitHub |
 | `原型/` | 0.3 MB | HTML 原型，**不在 git 里**，建议复制进仓库 |
 
@@ -120,7 +120,7 @@
 
 ### 3.2 配置文件（已完整归档，可安全删除）
 
-**17 个文件已逐字节复制到 `docs/local-ai-archive/`**，删除后从这里恢复即可。
+**18 个文件已逐字节复制到 `docs/local-ai-archive/`**，删除后从这里恢复即可。
 其中最重要的是 `DEPLOY-Qwen3.6.md`（26.8 KB），记录了全部调优结论。
 
 详细清单见 `docs/local-ai-archive/README.md`。
@@ -218,7 +218,7 @@ data/sample_terms.json  1.5 KB  术语示例
 |---|---|
 | 清理前 | 13.9 GB |
 | 删 35B 模型后 | 34.6 GB |
-| 删完两个目录后（预估） | **约 46 GB** |
+| 删完两个目录后（实测） | **46.4 GB** |
 
 释放明细：
 
@@ -248,3 +248,60 @@ D:\SubAI-Translator      5.56 GB
 光这三类重复就占了约 **1.6 GB**。它们不是设计冗余，是打包脚本把文件复制到多个位置
 （Tauri 的 `binaries/`、PyInstaller 的 `dist/`、顶层运行目录）。
 恢复时**每样只下一份**即可，打包脚本会自己复制。
+
+---
+
+## 八、C 盘残留（2026-10-26 补记，已全部清理）
+
+删除 D 盘两个目录后做全机搜索，发现**测试安装时在 C 盘装了一整套**，同样已清理。
+
+| 位置 | 大小 | 内容 |
+|---|---|---|
+| `AppData\Local\SubAI Translator\` | 1069 MB | 完整安装副本（含 uninstall.exe） |
+| `AppData\Local\com.subai.translator\` | 76 MB | WebView 数据（Tauri 前端缓存） |
+| 桌面 `SubAI-5.0.0\` | 646 MB | 安装包 `SubAI Translator_5.0.0_x64-setup.exe` |
+| `AppData\Roaming\SubAI\` 与 `subai\` | <1 KB | 用户级 `.env`（两份重复） |
+| `Temp\subai*` 10 个目录 | 191 MB | 测试产物（含 190 MB 的 preview_in.mkv） |
+| `Temp\pytest-of-Administrator\` | 30 MB | pytest 临时目录 |
+| `Temp\subai-*.log` 等 6 个文件 | 254 KB | 测试日志 |
+| 注册表 `HKCU\...\Uninstall\SubAI Translator` | — | 卸载项 |
+| 注册表 `HKCU\SOFTWARE\subai` | — | 应用设置 |
+| 桌面 + 开始菜单快捷方式 | — | 指向 C 盘安装目录 |
+
+**注意**：C 盘 `data\uploads\` 里有两个 172 MB 的视频，是
+`C:\Users\Administrator\Videos\NVIDIA\Delta Force\` 下 NVIDIA 回放文件的**副本**，
+原件完好，删除不影响。
+
+---
+
+## 九、⚠️ 三个 API Key 需要吊销
+
+清理过程中在以下位置发现**明文 API Key**（均指向 `api.deepseek.com`）：
+
+```
+C:\...\AppData\Local\SubAI Translator\.env
+  SUBAI_LLM_CLOUD_API_KEY=sk-0acae46179884e87b347d5ad53f51a11
+
+C:\...\AppData\Roaming\SubAI\.env
+C:\...\AppData\Roaming\subai\.env
+  SUBAI_LLM_CLOUD_API_KEY=sk-aa435e8b5de64ca68c65c991e370e379
+```
+
+这些文件**已删除**，但 Key 在服务端仍然有效。
+`sk-aa435e8b...` 这个此前还曾进入过 git 历史（后从仓库与索引移除）。
+
+**待办**：去 DeepSeek 控制台吊销上述两个 Key，重新签发。
+
+---
+
+## 十、备份中不含密钥（已核查）
+
+`docs/user-data-backup/.env` 是项目的**「分发安全版」**——全文都是注释，
+没有任何实际配置项，更没有 Key：
+
+```
+# 机密（云端 API Key 等）不放这里：本文件会随「整个文件夹拷给别人」一起泄露。
+# 放在用户级 %APPDATA%/SubAI/.env，读取优先级更高，也不会被分发带走。
+```
+
+仓库是 **public**，这一点已逐字节核对确认。

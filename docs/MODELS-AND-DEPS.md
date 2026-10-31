@@ -180,7 +180,36 @@ koboldcpp.exe --model models\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf   --port 5001 --cont
 
 ---
 
-## 六、Node.js（前端构建）
+### KoboldCpp-vl 目录（5003 视频通话实例）
+
+位置：`D:\AI\KoboldCpp-vl\`（约 2.8 GB，全部是模型）
+
+| 文件 | 大小 | 用途 |
+|---|---|---|
+| `models/Qwen3VL-4B-Instruct-Q4_K_M.gguf` | 2381.59 MB | 视觉模型本体 |
+| `models/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf` | 432.94 MB | 视觉投影层 |
+
+**这个目录没有 koboldcpp.exe**，复用 `D:\AI\KoboldCpp\koboldcpp.exe`（v1.115.2）。
+
+**来源**：`Qwen/Qwen3-VL-4B-Instruct` 的 GGUF 量化版，HuggingFace 上搜文件名可找到。
+国内镜像同样要注意 UA 与 `?download=true` 两个坑。
+
+**用途对照**（详见 `local-ai-archive/KoboldCpp-vl/README.md`）：
+
+| 端口 | 用途 | 模型 | 视觉编码 | 单帧耗时 |
+|---|---|---|---|---|
+| 5001 | SubAI 字幕翻译 | 35B-A3B | — | — |
+| 5002 | DSH 原适配 | 35B-A3B | CPU | 28.5 s/截图 |
+| 5003 | 视频通话 | Qwen3-VL-4B | **GPU** | **342–715 ms** |
+
+三个实例共用一块 8 GB 显卡，**不要同时运行**。
+
+**重新获取启动脚本**：全部在 `docs/local-ai-archive/KoboldCpp-vl/`，
+包括 `0-menu.bat`（统一菜单）、`start-5003-video.bat`、`download-models.bat`。
+
+---
+
+## 五、Node.js（前端构建）
 
 位置：`tools/nodejs/`（123 MB）
 
@@ -191,7 +220,7 @@ koboldcpp.exe --model models\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf   --port 5001 --cont
 
 ---
 
-## 七、前端依赖
+## 六、前端依赖
 
 位置：`frontend/node_modules/`（约 700 MB，已被 `.gitignore` 排除）
 
@@ -206,7 +235,7 @@ npm ci        # 严格按 package-lock.json 装，版本完全一致
 
 ---
 
-## 八、系统依赖
+## 七、系统依赖
 
 | 依赖 | 用途 | 说明 |
 |---|---|---|
@@ -219,7 +248,7 @@ npm ci        # 严格按 package-lock.json 装，版本完全一致
 
 ---
 
-## 九、完整还原步骤
+## 八、完整还原步骤
 
 假设代码已经从 GitHub clone 下来，从零还原到可运行：
 
@@ -261,7 +290,7 @@ cd frontend && npx vitest run
 
 ---
 
-## 十、删之前该确认的事
+## 九、删之前该确认的事
 
 删除任何模型前，逐条确认：
 
@@ -274,7 +303,7 @@ cd frontend && npx vitest run
 
 ---
 
-## 十一、验证清单（还原后跑一遍）
+## 十、验证清单（还原后跑一遍）
 
 ```bash
 # ASR 引擎是否都能加载
